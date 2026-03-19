@@ -43,6 +43,9 @@ Do rozwiązania problemu zastosowano **heurystykę zachłanną** (ang. *greedy a
 | S2 | Balansowanie liczby dyżurów nocnych względem średniej grupy | -5/dyżur ponad śr. |
 | S3 | Balansowanie dyżurów weekendowych | -3/dyżur ponad śr. |
 | S4 | Balansowanie dyżurów świątecznych | -3/dyżur ponad śr. |
+| S5 | Równomierne rozłożenie zmian w czasie – bonus za większą przerwę od ostatniej zmiany | +min(dni_przerwy, 7) × 2 |
+| S6 | Ochrona pojemności tygodniowej – kara gdy ta zmiana byłaby ostatnią możliwą w tygodniu (tylko etatowcy zmianowi) | -15 |
+| S7 | Rotacja niedzielna – kara gdy przydzielenie w tę niedzielę zablokowałoby pracownika na następną (2 poprzednie niedziele pracujące) | -500 |
 
 ## 4. Struktura algorytmu krok po kroku
 
@@ -85,44 +88,77 @@ Pracownicy ci pracują wyłącznie na zmianie R we wszystkie dni robocze miesią
 Dotyczy pracowników z typem umowy `duzy_kontrakt` lub `maly_kontrakt`.
 
 ```
-DLA KAŻDEGO kontraktowca:
-  DLA KAŻDEGO dnia miesiąca (chronologicznie):
-    JEŚLI przepracowane < minimum_kontraktu:
-      SPRAWDŹ możliwość DN (preferowane – 24h) → JEŚLI OK: PRZYDZIEL DN, BREAK
-      SPRAWDŹ możliwość D → JEŚLI OK: PRZYDZIEL D, BREAK
-      SPRAWDŹ możliwość N → JEŚLI OK: PRZYDZIEL N, BREAK
+POSORTUJ kontraktowców rosnąco wg liczby już przydzielonych zmian
+  (najpierw ci z mniejszą liczbą – zapewnia równomierne rozłożenie w grupie)
+
+DLA KAŻDEGO kontraktowca (w powyższej kolejności):
+  DOPÓKI przepracowane < minimum_kontraktu:
+    ZBIERZ wszystkie możliwe (dzień, kod) – kod ∈ {DN, D, N}:
+      - pomijaj dni zajęte lub niedostępne (ograniczenia twarde)
+      - respektuj limit max_day_shifts / max_night_shifts (bez tłumów)
+    DLA KAŻDEGO kandydującego dnia oblicz klucz sortowania:
+      klucz = (obsada_dnia, -luka, kara_kolejny, od_idealnej_pozycji)
+        obsada_dnia  – łączna bieżąca obsada D+N (im mniejsza, tym lepiej)
+        luka         – rozmiar luki między sąsiednimi zmianami pracownika
+                       (im większa luka, tym bardziej „potrzebny" jest tam dzień)
+        kara_kolejny – 200 gdy dzień następuje bezpośrednio po zmianie (unikanie skupisk)
+        od_ideal     – odległość od idealnie równomiernej pozycji w miesiącu
+    WYBIERZ dzień+kod z NAJNIŻSZYM kluczem → PRZYDZIEL zmianę
 ```
 
 Algorytm preferuje dyżury 24h (DN), ponieważ:
 - kontrakt wymaga dużej liczby godzin (min 160h/120h),
-- w oryginalnych grafnikach kontraktowcy mają dyżury DN,
+- w oryginalnych grafikach kontraktowcy mają dyżury DN,
 - minimalizuje to liczbę dni z dyżurami.
 
-### Faza 3: Obsada D/N etatowców zmianowych
+### Faza 3: Obsada D/N – wypełnienie minimalnej normy
 
-Jest to główna faza – zapewnia spełnienie normy obsady dla każdego dnia.
+Jest to główna faza – zapewnia spełnienie minimalnej normy obsady dla każdego dnia.
 
 ```
-DLA KAŻDEGO dnia miesiąca:
-  POLICZ aktualną obsadę D (z kontraktów i wcześniejszych przydziałów)
-  POLICZ aktualną obsadę N
-  brak_D = max(0, norma.D - obsada_D)
-  brak_N = max(0, norma.N - obsada_N)
+min_D = norma.day_shifts_min   # elastyczne minimum (np. 1 dla zakresu 1–2)
+min_N = norma.night_shifts     # stałe minimum nocne
 
+DLA KAŻDEGO dnia miesiąca:
+  POLICZ aktualną obsadę D i N (z kontraktów + wcześniejszych przydziałów)
+  brak_D = max(0, min_D - obsada_D)
+  brak_N = max(0, min_N - obsada_N)
+
+  # Krok 1: uzupełnij etatowcami zmianowymi
   DLA każdego brakującego dyżuru D:
     DLA KAŻDEGO etatowca bez zmiany w tym dniu:
-      OBLICZ score = scoring(pracownik, dzień, "D")
-        - JEŚLI ograniczenia twarde niespełnione → score = -∞
-        - INACZEJ:
-            score += (brakujące_godziny / 12h) × 10     [priorytet niedoboru]
-            score -= nadwyżka_nocy × 5                  [balans nocy]
-            score -= nadwyżka_weekendów × 3              [balans weekendów]
-            score -= nadwyżka_świąt × 3                  [balans świąt]
+      OBLICZ score(pracownik, dzień, "D")  [patrz sekcja 5]
     PRZYDZIEL zmianę D pracownikowi z NAJWYŻSZYM score
 
   DLA każdego brakującego dyżuru N:
     (analogicznie jak D, scoring dla kodu "N")
+
+  # Krok 2 (fallback): jeśli po Kroku 1 wciąż brakuje obsady
+  # (np. wszyscy etatowcy wyczerpali normatyw lub są zablokowania)
+  → uzupełnij kontraktowcami, którzy jeszcze nie mają zmiany w tym dniu
 ```
+
+Dwuetapowy fallback jest konieczny np. w ostatnią niedzielę miesiąca 5-niedzielnego, gdy wszyscy etatowcy mają wyczerpany normatyw lub blokadę rotacji niedzielnej.
+
+### Faza 3b: Uzupełnianie niedoborów godzin etatowców
+
+Po Fazie 3 minimalna norma obsady jest spełniona, ale część etatowców może nadal mieć niedobór godzin do normatywu (np. gdy nie przydzielono im wystarczającej liczby zmian w Fazie 3). Ta faza przydziela dodatkowe dyżury D lub N, przestrzegając górnych limitów obsady na dobę.
+
+```
+POWTARZAJ dopóki jakikolwiek etatowiec ma niedobór ≥ 12h:
+
+  POSORTUJ etatowców rosnąco wg liczby zmian
+    (najpierw ci z najmniejszą liczbą – wyrównuje obciążenie)
+
+  DLA KAŻDEGO etatowca z niedoborem ≥ 12h:
+    ZBIERZ wolne dni, w które można przydzielić D lub N:
+      - respektuj ograniczenia twarde (przerwa 12h, 36h/tydz., normatyw)
+      - respektuj limit max_day_shifts / max_night_shifts (bez tłumów)
+    DLA KAŻDEGO kandydującego dnia oblicz klucz: (obsada, -luka, kara_kolejny)
+    WYBIERZ najlepszy dzień → PRZYDZIEL D lub N
+```
+
+Limity `max_day_shifts` i `max_night_shifts` (konfigurowane w `config.py` per oddział) gwarantują, że dopełnianie niedoborów nie generuje „tłumów" na jednej dobie.
 
 ### Faza 4: Końcówki DK
 
@@ -137,18 +173,25 @@ DLA KAŻDEGO etatowca zmianowego:
         BREAK
 ```
 
-### Faza 5: Weryfikacja
+### Faza 5: Uzupełnienie pustych dni (fallback awaryjny)
+
+Ta faza jest siatką bezpieczeństwa. Sprawdza, czy każdy dzień miesiąca ma co najmniej jedną osobę na zmianie roboczej, i awaryjnie uzupełnia dni całkowicie puste.
 
 ```
-DLA KAŻDEGO dnia:
-  SPRAWDŹ czy obsada D >= norma.day_shifts
-  SPRAWDŹ czy obsada N >= norma.night_shifts
-  JEŚLI brak → zaloguj ostrzeżenie (niewystarczająca liczba personelu)
+DLA KAŻDEGO dnia miesiąca:
+  JEŚLI liczba osób z jakąkolwiek zmianą roboczą >= 1 → POMIŃ
 
-DLA KAŻDEGO pracownika:
-  SPRAWDŹ bilans godzin
-  JEŚLI etatowiec ma bilans > 0 → ostrzeżenie o nadgodzinach
-  JEŚLI kontrakt ma bilans < 0 → ostrzeżenie o niedoborze
+  # Dzień całkowicie pusty – dwie próby przydzielenia:
+  PRÓBA 1 (bez nadgodzin):
+    POSORTUJ pracowników rosnąco wg bilansu (najpierw ci z niedoborem)
+    DLA KAŻDEGO pracownika (w powyższej kolejności):
+      JEŚLI niedyspozycja LUB zajęty LUB weekendowe ograniczenie → POMIŃ
+      JEŚLI etat AND przepracowane + 12h > normatyw → POMIŃ
+      PRZYDZIEL D lub N (w zależności od aktualnej obsady D vs N) → BREAK
+
+  PRÓBA 2 (emergency – jeśli Próba 1 się nie powiodła):
+    Jak wyżej, ale bez sprawdzania bilansu normatywu
+    → zapewnia, że żaden dzień nie pozostaje całkowicie bez obsady
 ```
 
 ## 5. Funkcja scoring – szczegóły
@@ -162,27 +205,45 @@ score = 0
 JEŚLI NIE czy_mozna_przydzielic(...):
     ZWRÓĆ -∞
 
-# Kryterium 1: priorytet niedoboru godzin
+# Kryterium 1 (S1): priorytet niedoboru godzin
 score += (pozostałe_minuty / 720) × 10
 
-# Kryterium 2: balans dyżurów nocnych
+# Kryterium 2 (S2): balans dyżurów nocnych
 avg_nocne = suma_nocnych_w_grupie / liczba_pracowników
 score -= max(0, nocne_pracownika - avg_nocne) × 5
 
-# Kryterium 3: balans weekendów
+# Kryterium 3 (S3): balans weekendów
 avg_weekend = suma_weekendowych / liczba_pracowników
 score -= max(0, weekendowe_pracownika - avg_weekend) × 3
 
-# Kryterium 4: balans świąt
+# Kryterium 4 (S4): balans świąt
 avg_swieta = suma_swiatecznych / liczba_pracowników
 score -= max(0, swiateczne_pracownika - avg_swieta) × 3
+
+# Kryterium 5 (S5): równomierne rozłożenie – bonus za dłuższą przerwę od ostatniej zmiany
+gap = liczba_dni_od_ostatniej_zmiany(pracownik, data)
+score += min(gap, 7) × 2       # bonus rośnie do 7 dni, potem plateau
+
+# Kryterium 6 (S6): ochrona pojemności tygodniowej (tylko etatowcy zmianowi)
+JEŚLI etat AND NOT tylko_7h:
+    pozostalo_w_tygodniu = 36h - juz_przepracowane_w_tygodniu - 12h
+    JEŚLI pozostalo_w_tygodniu < 12h:
+        score -= 15             # ta zmiana wyczerpuje tydzień → kara
+
+# Kryterium 7 (S7): rotacja niedzielna
+JEŚLI data jest niedzielą:
+    JEŚLI pracownik miał dyżur w poprzednią niedzielę AND dwie niedziele temu
+       AND następna niedziela jest w tym samym miesiącu:
+        score -= 500            # przydzielenie teraz blokuje następną niedzielę
 
 ZWRÓĆ score
 ```
 
 Wagi zostały dobrane eksperymentalnie tak, aby:
-- Priorytet niedoboru godzin był dominującym kryterium (waga 10).
-- Balans nocek był ważniejszy od weekendów/świąt (waga 5 > 3).
+- Priorytet niedoboru godzin był dominującym kryterium zwykłym (waga 10).
+- Balans nocy był ważniejszy od weekendów/świąt (waga 5 > 3).
+- Równomierne rozłożenie (S5, max +14) działało jako miękka korekta.
+- Rotacja niedzielna (S7, −500) była praktycznie wetem, ustępującym tylko gdy nie ma lepszej opcji.
 
 ## 6. Złożoność obliczeniowa
 
@@ -190,10 +251,12 @@ Wagi zostały dobrane eksperymentalnie tak, aby:
 |------|-----------|------|
 | Faza 0 | O(P) | Obliczanie normatywów |
 | Faza 1 | O(D × P_R) | P_R – liczba pracowników tylko_7h |
-| Faza 2 | O(D × P_K × 3) | P_K – kontraktowcy, 3 typy zmian |
-| Faza 3 | O(D × (P_E)²) | P_E – etatowcy, scoring każdego kandydata |
+| Faza 2 | O(D × P_K²) | P_K – kontraktowcy, sortowanie kandydatów po dniach |
+| Faza 3 | O(D × P_E²) | P_E – etatowcy, scoring każdego kandydata |
+| Faza 3b | O(iter × D × P_E²) | iter – liczba iteracji pętli uzupełniania (≤ P_E) |
 | Faza 4 | O(D × P_E) | Szukanie dnia na końcówkę |
-| **Łącznie** | **O(D × P²)** | Praktycznie: D=31, P≤15 → ~7000 operacji |
+| Faza 5 | O(D × P) | Fallback awaryjny dla pustych dni |
+| **Łącznie** | **O(P_E × D × P²)** | Praktycznie: D=31, P_E≤12 → kilkadziesiąt tysięcy operacji |
 
 Dla typowych rozmiarów (50 pracowników, 5 grup, 31 dni) całkowity czas generowania wynosi poniżej 1 sekundy.
 
