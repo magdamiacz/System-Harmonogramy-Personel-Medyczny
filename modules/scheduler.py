@@ -788,6 +788,12 @@ def oblicz_podsumowanie(
         else:
             bilans_str = "0h (OK)"
 
+        # Suma dyżurów = liczba wszystkich zmian roboczych (D, N, DN, R, DK)
+        suma_dyzurow = sum(
+            1 for kod in state.przydzial[imie].values()
+            if kod in WORKING_SHIFTS
+        )
+
         wyniki.append({
             "Imię i nazwisko": imie,
             "Typ umowy": p.typ_umowy,
@@ -795,6 +801,7 @@ def oblicz_podsumowanie(
             "Przepracowane": _minuty_na_str(przeprac),
             "Bilans": bilans_str,
             "Bilans_min": bilans,
+            "Suma dyżurów": suma_dyzurow,
             "Dyżury dzienne": state.liczba_dziennych[imie],
             "Dyżury nocne": state.liczba_nocnych[imie],
             "Dyżury weekendowe": state.liczba_weekendowych[imie],

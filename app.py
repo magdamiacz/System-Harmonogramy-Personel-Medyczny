@@ -30,7 +30,7 @@ st.set_page_config(
 )
 
 st.title("Zautomatyzowany System Generowania Harmonogramów Pracy")
-st.caption("Personel medyczny | Algorytm zachłanny | Praca dyplomowa 2025/2026")
+st.caption("Personel medyczny | Algorytm zachłanny")
 
 # ---------------------------------------------------------------------------
 # Sidebar: parametry i import danych

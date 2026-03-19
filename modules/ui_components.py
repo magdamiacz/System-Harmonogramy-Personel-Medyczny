@@ -18,11 +18,14 @@ from modules.scheduler import HarmonogramState, oblicz_podsumowanie
 
 
 # ---------------------------------------------------------------------------
-# Kolory kolumn: weekend = żółty, święto = czerwony
+# Kolory kolumn: weekend = bordowy, święto = czerwony
 # ---------------------------------------------------------------------------
 
-KOLOR_KOLUMNY_WEEKEND = "#4F1C12"   
-KOLOR_KOLUMNY_SWIETO  = "#ffe0e0"   
+KOLOR_KOLUMNY_WEEKEND = "#4F1C12"   # Bordowy
+KOLOR_KOLUMNY_SWIETO  = "#ffe0e0"   # Jasny czerwony
+
+# Kolory ciemne – wymagają jasnego tekstu dla czytelności
+KOLORY_CIEMNE = {"#4f1c12", "#190e87"}
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +35,7 @@ KOLOR_KOLUMNY_SWIETO  = "#ffe0e0"
 KOLOR_ZMIANY: Dict[str, str] = {
     "D":  "#c8e6c9",   # Zielony – dyżur dzienny
     "N":  "#bbdefb",   # Niebieski – dyżur nocny
-    "DN": "#190E87",   # Żółty – całodobowy (kontrakt)
+    "DN": "#190E87",   # Ciemny niebieski – całodobowy (kontrakt)
     "R":  "#dcedc8",   # Jasnozielony – zmiana robocza 7h35
     "DK": "#ffe0b2",   # Pomarańczowy – końcówka
     "U":  "#ffcdd2",   # Czerwony – urlop
@@ -123,10 +126,11 @@ def _buduj_styled_df(
 ) -> "pd.io.formats.style.Styler":
     """
     Tworzy Pandas Styler z kolorowaniem:
-      - komórki weekendów (So/Nd): żółte tło
+      - komórki weekendów (So/Nd): bordowe tło
       - komórki świąt: czerwone tło
       - komórki ze zmianą (D/N/DN/R/DK/U/UM/W): kolor według typu zmiany
     Kolor typu zmiany ma priorytet nad kolorem kolumny.
+    Dla ciemnych tła: jasny tekst dla czytelności.
     """
     NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
     col_to_date: Dict[str, datetime.date] = {
@@ -149,7 +153,11 @@ def _buduj_styled_df(
             v = str(val).strip() if val else ""
             shift_bg = KOLOR_ZMIANY.get(v, "") if v else ""
             bg = shift_bg if shift_bg else col_bg
-            styles.append(f"background-color: {bg}" if bg else "")
+            if bg:
+                txt = "color: #ffffff;" if bg.lower() in KOLORY_CIEMNE else ""
+                styles.append(f"background-color: {bg}; {txt}")
+            else:
+                styles.append("")
         return styles
 
     data_cols = [c for c in df.columns if c != "Imię i nazwisko"]
@@ -258,7 +266,7 @@ def renderuj_harmonogram(
 ) -> Optional[HarmonogramState]:
     """
     Wyświetla tabelę harmonogramu z kolorowaniem oraz edytor poniżej.
-    Górna tabela (st.dataframe) pokazuje kolory: żółty = weekend, czerwony = święto.
+    Górna tabela (st.dataframe) pokazuje kolory: bordowy = weekend, czerwony = święto.
     Edytor (st.data_editor) umożliwia ręczne poprawki.
     Po edycji zwraca zaktualizowany HarmonogramState, w przeciwnym razie None.
     """
@@ -272,8 +280,8 @@ def renderuj_harmonogram(
     col_leg1, col_leg2 = st.columns(2)
     with col_leg1:
         st.caption(
-            "🟡 weekend (So/Nd)  |  🔴 święto  "
-            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=żółty, R=limonka, DK=pomarańczowy)"
+            "🟤 weekend (So/Nd)  |  🔴 święto  "
+            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=ciemny niebieski, R=limonka, DK=pomarańczowy)"
         )
     with col_leg2:
         with st.expander("Legenda kodów zmian"):
