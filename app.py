@@ -11,7 +11,7 @@ import streamlit as st
 # Dodaj katalog projektu do ścieżki (potrzebne gdy uruchamiamy z innego folderu)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import SCHEDULE_KEYS, SCHEDULE_LABELS
+from config import SCHEDULE_KEYS, SCHEDULE_LABELS, WORK_MINUTES_PER_DAY_STANDARD
 from modules.data_loader import grupuj_wg_harmonogramu, wczytaj_niedyspozycje, wczytaj_personel
 from modules.holidays import get_month_info
 from modules.scheduler import generuj_wszystkie_harmonogramy
@@ -205,13 +205,16 @@ if not harmonogramy:
             language="csv",
         )
 else:
-    # Metadane miesiąca
+    # Metadane miesiąca (normatyw = dni_robocze × 7h35min)
     nazwa_miesiaca = datetime.date(int(rok), int(miesiac), 1).strftime("%B %Y")
+    normatyw_min = info["liczba_dni_roboczych"] * WORK_MINUTES_PER_DAY_STANDARD
+    normatyw_h = normatyw_min // 60
+    normatyw_m = normatyw_min % 60
+    normatyw_str = f"{normatyw_h}h{normatyw_m:02d}min" if normatyw_m else f"{normatyw_h}h"
     st.markdown(
         f"### {nazwa_miesiaca.capitalize()}  "
         f"| Dni robocze: **{info['liczba_dni_roboczych']}**  "
-        f"| Normatyw etat: **{info['liczba_dni_roboczych'] * 7}h "
-        f"{(info['liczba_dni_roboczych'] * 455) % 60}min**"
+        f"| Normatyw etat: **{normatyw_str}**"
     )
 
     # Listowanie świąt w miesiącu

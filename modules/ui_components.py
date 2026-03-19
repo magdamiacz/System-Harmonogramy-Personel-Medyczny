@@ -21,24 +21,24 @@ from modules.scheduler import HarmonogramState, oblicz_podsumowanie
 # Kolory kolumn: weekend = żółty, święto = czerwony
 # ---------------------------------------------------------------------------
 
-KOLOR_KOLUMNY_WEEKEND = "#ffffcc"   # Jasny żółty
-KOLOR_KOLUMNY_SWIETO = "#ffcccc"    # Jasny czerwony
+KOLOR_KOLUMNY_WEEKEND = "#4F1C12"   
+KOLOR_KOLUMNY_SWIETO  = "#ffe0e0"   
 
 
 # ---------------------------------------------------------------------------
-# Kolory komórek harmonogramu (dla przyszłego użycia)
+# Kolory komórek harmonogramu (typ zmiany)
 # ---------------------------------------------------------------------------
 
 KOLOR_ZMIANY: Dict[str, str] = {
-    "D":  "#d4edda",   # Zielony jasny – dzień
-    "N":  "#cce5ff",   # Niebieski jasny – noc
-    "DN": "#fff3cd",   # Żółty – całodobowy
-    "R":  "#e2f0cb",   # Jasnozielony – krótka zmiana
-    "DK": "#ffeeba",   # Pomarańczowy jasny – końcówka
-    "U":  "#f8d7da",   # Czerwony jasny – urlop
-    "UM": "#f5c6cb",   # Różowy – urlop macierzyński
-    "W":  "#e2e3e5",   # Szary – wolne
-    "":   "#ffffff",   # Biały – pusty
+    "D":  "#c8e6c9",   # Zielony – dyżur dzienny
+    "N":  "#bbdefb",   # Niebieski – dyżur nocny
+    "DN": "#190E87",   # Żółty – całodobowy (kontrakt)
+    "R":  "#dcedc8",   # Jasnozielony – zmiana robocza 7h35
+    "DK": "#ffe0b2",   # Pomarańczowy – końcówka
+    "U":  "#ffcdd2",   # Czerwony – urlop
+    "UM": "#f8bbd0",   # Różowy – urlop macierzyński
+    "W":  "#eeeeee",   # Szary – wolne
+    "":   "",          # Puste = kolor kolumny (weekend/święto) lub biały
 }
 
 
@@ -116,6 +116,46 @@ def buduj_df_do_edycji(
 # Nagłówek normatywu i końcówki
 # ---------------------------------------------------------------------------
 
+def _buduj_styled_df(
+    df: pd.DataFrame,
+    dni: List[datetime.date],
+    swieta: Set[datetime.date],
+) -> "pd.io.formats.style.Styler":
+    """
+    Tworzy Pandas Styler z kolorowaniem:
+      - komórki weekendów (So/Nd): żółte tło
+      - komórki świąt: czerwone tło
+      - komórki ze zmianą (D/N/DN/R/DK/U/UM/W): kolor według typu zmiany
+    Kolor typu zmiany ma priorytet nad kolorem kolumny.
+    """
+    NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
+    col_to_date: Dict[str, datetime.date] = {
+        f"{NAZWY_DNI[d.weekday()]} {d.day}": d for d in dni
+    }
+
+    def style_col(col: pd.Series) -> List[str]:
+        if col.name not in col_to_date:
+            return [""] * len(col)
+        d = col_to_date[col.name]
+        if d in swieta:
+            col_bg = KOLOR_KOLUMNY_SWIETO
+        elif d.weekday() >= 5:
+            col_bg = KOLOR_KOLUMNY_WEEKEND
+        else:
+            col_bg = ""
+
+        styles = []
+        for val in col:
+            v = str(val).strip() if val else ""
+            shift_bg = KOLOR_ZMIANY.get(v, "") if v else ""
+            bg = shift_bg if shift_bg else col_bg
+            styles.append(f"background-color: {bg}" if bg else "")
+        return styles
+
+    data_cols = [c for c in df.columns if c != "Imię i nazwisko"]
+    return df.style.apply(style_col, axis=0, subset=pd.IndexSlice[:, data_cols])
+
+
 def buduj_tekst_normatywu(
     state: HarmonogramState,
     liczba_dni_roboczych: int,
@@ -143,23 +183,6 @@ def buduj_tekst_normatywu(
     linie.append(f"**Normatyw z orzeczeniem**: {liczba_dni_roboczych} × 7h = **{_minuty_na_str(norm_orz)}**")
     linie.append("**Kontrakty**: duży min. 160h, mały min. 120h")
     return " | ".join(linie)
-
-
-def _generuj_css_kolory_kolumn(
-    dni: List[datetime.date],
-    swieta: Set[datetime.date],
-) -> str:
-    """Generuje CSS do kolorowania kolumn: weekend=żółty, święto=czerwony."""
-    reguly = []
-    for i, d in enumerate(dni):
-        # Kolumna: 0=Imię, 1..31=dni → nth-child(i+2)
-        n = i + 2
-        sel = f"td:nth-child({n}), th:nth-child({n})"
-        if d in swieta:
-            reguly.append(f"[data-testid='stDataFrame'] {sel}, .stDataFrame {sel} {{ background-color: {KOLOR_KOLUMNY_SWIETO} !important; }}")
-        elif d.weekday() >= 5:
-            reguly.append(f"[data-testid='stDataFrame'] {sel}, .stDataFrame {sel} {{ background-color: {KOLOR_KOLUMNY_WEEKEND} !important; }}")
-    return "\n".join(reguly)
 
 
 # ---------------------------------------------------------------------------
@@ -234,43 +257,51 @@ def renderuj_harmonogram(
     liczba_dni_roboczych: int = 0,
 ) -> Optional[HarmonogramState]:
     """
-    Wyświetla edytowalną tabelę harmonogramu w Streamlit.
-    Po edycji zwraca zaktualizowany HarmonogramState.
-    Zwraca None jeśli nie było edycji.
+    Wyświetla tabelę harmonogramu z kolorowaniem oraz edytor poniżej.
+    Górna tabela (st.dataframe) pokazuje kolory: żółty = weekend, czerwony = święto.
+    Edytor (st.data_editor) umożliwia ręczne poprawki.
+    Po edycji zwraca zaktualizowany HarmonogramState, w przeciwnym razie None.
     """
     st.subheader(label)
 
     # Nagłówek: normatyw i końcówka
     if liczba_dni_roboczych > 0:
         st.markdown(buduj_tekst_normatywu(state, liczba_dni_roboczych))
-        st.caption("Kolumny: żółty = weekend, czerwony = święto")
 
-    # CSS: kolorowanie kolumn weekend/święta
-    css = _generuj_css_kolory_kolumn(dni, swieta)
-    if css:
-        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-    # Informacja pomocnicza: legenda
-    with st.expander("Legenda kodów zmian"):
-        st.markdown("""
-        | Kod | Znaczenie | Godziny |
-        |-----|-----------|---------|
-        | **D** | Dyżur dzienny | 7:00–19:00 (12h) |
-        | **N** | Dyżur nocny | 19:00–7:00 (12h) |
-        | **DN** | Dyżur całodobowy | 7:00–7:00 (24h) – tylko kontrakty |
-        | **R** | Zmiana robocza | 7:00–14:35 (7h35min) |
-        | **DK** | Końcówka | zmienna (reszta do normatywu) |
-        | **U** | Urlop | — |
-        | **UM** | Urlop macierzyński | — |
-        | **W** | Wolne za niedzielę/święto | — |
-        """)
+    # Legenda kolorów
+    col_leg1, col_leg2 = st.columns(2)
+    with col_leg1:
+        st.caption(
+            "🟡 weekend (So/Nd)  |  🔴 święto  "
+            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=żółty, R=limonka, DK=pomarańczowy)"
+        )
+    with col_leg2:
+        with st.expander("Legenda kodów zmian"):
+            st.markdown("""
+            | Kod | Znaczenie | Godziny |
+            |-----|-----------|---------|
+            | **D** | Dyżur dzienny | 7:00–19:00 (12h) |
+            | **N** | Dyżur nocny | 19:00–7:00 (12h) |
+            | **DN** | Dyżur całodobowy | 7:00–7:00 (24h) – kontrakty |
+            | **R** | Zmiana robocza | 7:00–14:35 (7h35min) |
+            | **DK** | Końcówka | reszta do normatywu |
+            | **U** | Urlop | — |
+            | **UM** | Urlop macierzyński | — |
+            | **W** | Wolne za niedzielę/święto | — |
+            """)
 
     df = buduj_df_do_edycji(state, dni, swieta)
 
-    # Kolumny danych (bez "Imię i nazwisko")
-    data_cols = [c for c in df.columns if c != "Imię i nazwisko"]
+    # ── Kolorowana tabela (tylko do odczytu) ──────────────────────────────────
+    styled = _buduj_styled_df(df, dni, swieta)
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    # Konfiguracja kolumn dla data_editor
+    # ── Edytor (bez kolorów, ale z możliwością edycji) ────────────────────────
+    NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
     col_config = {
         "Imię i nazwisko": st.column_config.TextColumn(
             "Imię i nazwisko",
@@ -278,27 +309,24 @@ def renderuj_harmonogram(
             width="medium",
         )
     }
-
-    NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
-    for i, d in enumerate(dni):
+    for d in dni:
         col_name = f"{NAZWY_DNI[d.weekday()]} {d.day}"
-        is_weekend = d.weekday() >= 5
-        is_swieto = czy_swieto(d, swieta)
-
         col_config[col_name] = st.column_config.SelectboxColumn(
             label=col_name,
             options=["", "D", "N", "DN", "R", "DK", "U", "UM", "W"],
             width="small",
         )
 
-    edited_df = st.data_editor(
-        df,
-        key=f"editor_{key_prefix}",
-        use_container_width=True,
-        column_config=col_config,
-        hide_index=True,
-        num_rows="fixed",
-    )
+    with st.expander("✏️ Edytuj harmonogram", expanded=False):
+        st.caption("Wprowadź zmiany w tabeli poniżej – kolorowana tabela powyżej odświeży się po zatwierdzeniu.")
+        edited_df = st.data_editor(
+            df,
+            key=f"editor_{key_prefix}",
+            use_container_width=True,
+            column_config=col_config,
+            hide_index=True,
+            num_rows="fixed",
+        )
 
     # Sprawdź czy nastąpiła edycja
     if not df.equals(edited_df):

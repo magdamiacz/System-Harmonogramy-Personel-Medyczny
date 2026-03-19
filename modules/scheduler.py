@@ -14,13 +14,14 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from config import (
     FULL_SHIFT_MINUTES,
+    MAX_WEEKLY_MINUTES_ETAT,
     MIN_HOURS_DUZY_KONTRAKT,
     MIN_HOURS_MALY_KONTRAKT,
     STAFFING_NORMS,
     WORK_MINUTES_PER_DAY_STANDARD,
     WORKING_SHIFTS,
 )
-from modules.constraints import czy_mozna_przydzielic
+from modules.constraints import czy_mozna_przydzielic, oblicz_godziny_tygodnia
 from modules.data_loader import Pracownik
 from modules.holidays import czy_niedziela, czy_swieto, czy_weekend
 from modules.normative import Normatyw, oblicz_normatywy
@@ -133,6 +134,46 @@ class HarmonogramState:
 
 
 # ---------------------------------------------------------------------------
+# Rozłożenie zmian w czasie (unikanie skupisk)
+# ---------------------------------------------------------------------------
+
+def _rozmiar_luki_pracownika(imie: str, data: datetime.date, state: HarmonogramState) -> int:
+    """
+    Zwraca rozmiar "luki" (w dniach), w którą wpada dana data.
+    Luka = ciągły blok dni wolnych między zmianami pracownika.
+    Im większa luka, tym lepiej przypisać tam zmianę (równomierne rozłożenie).
+    """
+    dni_pracy = sorted(
+        d for d, kod in state.przydzial[imie].items()
+        if kod in WORKING_SHIFTS
+    )
+    if not dni_pracy:
+        return len(state.dni)  # Cały miesiąc wolny
+    # Luki: przed pierwszą, między, po ostatniej
+    pierwszy = state.dni[0]
+    ostatni = state.dni[-1]
+    if data < dni_pracy[0]:
+        return (dni_pracy[0] - pierwszy).days
+    if data > dni_pracy[-1]:
+        return (ostatni - dni_pracy[-1]).days
+    for i in range(len(dni_pracy) - 1):
+        if dni_pracy[i] < data < dni_pracy[i + 1]:
+            return (dni_pracy[i + 1] - dni_pracy[i]).days - 1
+    return 0
+
+
+def _dni_od_ostatniej_zmiany(imie: str, data: datetime.date, state: HarmonogramState) -> int:
+    """Ile dni minęło od ostatniej zmiany pracownika (lub od początku miesiąca)."""
+    dni_pracy = [d for d, kod in state.przydzial[imie].items() if kod in WORKING_SHIFTS]
+    if not dni_pracy:
+        return (data - state.dni[0]).days
+    przed_data = [d for d in dni_pracy if d < data]
+    if not przed_data:
+        return (data - state.dni[0]).days
+    return (data - max(przed_data)).days
+
+
+# ---------------------------------------------------------------------------
 # Funkcja scoring pracowników (zachłanna heurystyka)
 # ---------------------------------------------------------------------------
 
@@ -189,6 +230,34 @@ def score_pracownik(
     if n > 1:
         avg_swiata = sum(state.liczba_swiatecznych.values()) / n
         score -= max(0, state.liczba_swiatecznych[imie] - avg_swiata) * 3
+
+    # Równomierne rozłożenie: preferuj pracowników z większą luką od ostatniej zmiany
+    # (unika skupisk zmian pod rząd)
+    gap = _dni_od_ostatniej_zmiany(imie, data, state)
+    score += min(gap, 7) * 2  # Bonus do 7 dni przerwy
+
+    # Kara za pracownika, który po tej zmianie nie będzie mógł pracować w tym tygodniu
+    # → zachowaj wolną pojemność tygodniową dla innych dni
+    if p.is_etat and not p.tylko_7h:
+        weekly_used = oblicz_godziny_tygodnia(
+            state.przydzial[imie], data, normatyw.koncowka_minuty
+        )
+        weekly_remaining_after = MAX_WEEKLY_MINUTES_ETAT - weekly_used - FULL_SHIFT_MINUTES
+        if weekly_remaining_after < FULL_SHIFT_MINUTES:
+            score -= 15  # Kara: ostatnia zmiana w tym tygodniu
+
+    # Kara za blokowanie się na kolejną niedzielę (rotacja niedzielna)
+    # Jeśli to niedziela i pracownik przepracował 2 poprzednie niedziele z rzędu,
+    # przydzielenie go dziś zablokuje go na NASTĘPNĄ niedzielę → weto (-inf).
+    # Fallback (gdy wszyscy są zablokowania): duża kara zamiast -inf.
+    if data.weekday() == 6:
+        prev_sun1 = data - datetime.timedelta(weeks=1)
+        prev_sun2 = data - datetime.timedelta(weeks=2)
+        next_sun  = data + datetime.timedelta(weeks=1)
+        w1 = state.get_przydzial(imie, prev_sun1) in WORKING_SHIFTS
+        w2 = state.get_przydzial(imie, prev_sun2) in WORKING_SHIFTS
+        if w1 and w2 and next_sun in state.dni:
+            score -= 500  # Blokuje się na następną niedzielę – prawie weto
 
     return score
 
@@ -258,50 +327,63 @@ def faza_2_kontrakty(
     max_d = _get_max_shifts(norm, "D")
     max_n = _get_max_shifts(norm, "N")
 
-    for p in kontrakty:
+    # Kolejność: pracownicy z mniejszą liczbą zmian najpierw (równomierne rozłożenie)
+    kontrakty_posortowane = sorted(
+        kontrakty,
+        key=lambda x: (len(state.przydzial[x.imie_nazwisko]), x.imie_nazwisko),
+    )
+
+    for p in kontrakty_posortowane:
         imie = p.imie_nazwisko
         normatyw = state.normatywy[imie]
 
-        # Dni posortowane po obsadzie (rosnąco) – rozkład zamiast tłumów
-        dni_posortowane = sorted(
-            state.dni,
-            key=lambda d: (state.liczba_na_dzien(d, "D") + state.liczba_na_dzien(d, "N")),
-        )
+        potrzebne_zmiany = max(1, (normatyw.minuty + FULL_SHIFT_MINUTES - 1) // FULL_SHIFT_MINUTES)
 
-        for data in dni_posortowane:
-            if state.przepracowane[imie] >= normatyw.minuty:
+        def _klucz_dnia(d):
+            liczba_zmian = len([k for k in state.przydzial[imie].values() if k in WORKING_SHIFTS])
+            obs = state.liczba_na_dzien(d, "D") + state.liczba_na_dzien(d, "N")
+            luka = _rozmiar_luki_pracownika(imie, d, state)
+            # Równomierne rozłożenie: następna zmiana przy "idealnej" pozycji
+            ideal_idx = liczba_zmian * len(state.dni) / potrzebne_zmiany if potrzebne_zmiany else 0
+            od_ideal = abs(state.dni.index(d) - ideal_idx)
+            # Preferuj dni z przerwą (unikaj skupisk pod rząd)
+            dni_od_ost = _dni_od_ostatniej_zmiany(imie, d, state)
+            kara_kolejny = 200 if dni_od_ost <= 1 else 0  # dzień po zmianie = wyraźnie gorzej
+            return (obs, -luka, kara_kolejny, od_ideal)
+
+        while state.przepracowane[imie] < normatyw.minuty:
+            # Zbierz WSZYSTKIE możliwe (data, kod), posortuj po rozłożeniu, wybierz najlepszy
+            kandydaci = []
+            for data in state.dni:
+                if state.get_przydzial(imie, data) != "":
+                    continue
+                if data.weekday() >= 5 and not p.pracuje_w_weekendy:
+                    continue
+                obs_d = state.liczba_na_dzien(data, "D")
+                obs_n = state.liczba_na_dzien(data, "N")
+                klucz = _klucz_dnia(data)
+
+                for kod in ("DN", "D", "N"):
+                    if kod == "DN" and (obs_d >= max_d or obs_n >= max_n):
+                        continue
+                    if kod == "D" and obs_d >= max_d:
+                        continue
+                    if kod == "N" and obs_n >= max_n:
+                        continue
+                    if czy_mozna_przydzielic(
+                        p, data, kod,
+                        state.przydzial[imie], state.przepracowane[imie],
+                        normatyw.minuty * 2, normatyw.koncowka_minuty,
+                        data.year, data.month,
+                    ):
+                        kandydaci.append((klucz, data, kod))
+                        break  # jeden kod wystarczy na dzień
+
+            if not kandydaci:
                 break
-
-            if state.get_przydzial(imie, data) != "":
-                continue
-
-            if data.weekday() >= 5 and not p.pracuje_w_weekendy:
-                continue
-
-            obs_d = state.liczba_na_dzien(data, "D")
-            obs_n = state.liczba_na_dzien(data, "N")
-
-            for kod in ("DN", "D", "N"):
-                # DN zajmuje slot D i N – oba muszą mieć miejsce
-                if kod == "DN" and (obs_d >= max_d or obs_n >= max_n):
-                    continue
-                if kod == "D" and obs_d >= max_d:
-                    continue
-                if kod == "N" and obs_n >= max_n:
-                    continue
-                if czy_mozna_przydzielic(
-                    pracownik=p,
-                    data=data,
-                    nowy_kod=kod,
-                    przydzial=state.przydzial[imie],
-                    przepracowane_minuty=state.przepracowane[imie],
-                    normatyw_minuty=normatyw.minuty * 2,
-                    koncowka_minuty=normatyw.koncowka_minuty,
-                    rok=data.year,
-                    miesiac=data.month,
-                ):
-                    state.przydziel(imie, data, kod)
-                    break
+            kandydaci.sort(key=lambda x: x[0])
+            _, data, kod = kandydaci[0]
+            state.przydziel(imie, data, kod)
 
 
 # ---------------------------------------------------------------------------
@@ -313,15 +395,33 @@ def faza_3_obsada(
     norm: object,  # DailyStaffingNorm
 ) -> None:
     """
-    Dla każdego dnia miesiąca sprawdza brakującą obsadę (D/N)
-    i zachłannie przydziela etatowcom najlepiej pasującego pracownika.
+    Dla każdego dnia miesiąca sprawdza brakującą obsadę (D/N) i zachłannie
+    przydziela pracowników: najpierw etatowcy, potem kontrakty (jako dopenienie).
+    Używa minimalnej obsady (day_shifts_min) jako celu.
     """
     etatowcy = [p for p in state.pracownicy if p.is_etat and not p.tylko_7h]
-    if not etatowcy:
-        return
+    kontrakty = [p for p in state.pracownicy if p.is_kontrakt and not p.tylko_7h]
+
+    # Twardy minimum D: jeśli oddział ma elastyczny zakres (np. 1-2), użyj minimum
+    min_d_hard = norm.day_shifts_min if norm.day_shifts_min > 0 else norm.day_shifts
+
+    def _przydziel_brakujacych(data, brak, kod, pula):
+        """Pomocnicza: przydziela 'brak' zmian 'kod' z puli pracowników."""
+        for _ in range(brak):
+            kandydaci = [
+                (score_pracownik(p, data, kod, state), p)
+                for p in pula
+                if state.get_przydzial(p.imie_nazwisko, data) == ""
+            ]
+            kandydaci = [(s, p) for s, p in kandydaci if s > float("-inf")]
+            if not kandydaci:
+                break
+            kandydaci.sort(key=lambda x: x[0], reverse=True)
+            _, najlepszy = kandydaci[0]
+            state.przydziel(najlepszy.imie_nazwisko, data, kod)
 
     for data in state.dni:
-        # Policz aktualną obsadę D i N (łącznie z kontraktami)
+        # Policz aktualną obsadę D i N (łącznie ze wszystkimi typami)
         obsada_d = sum(
             1 for p in state.pracownicy
             if state.get_przydzial(p.imie_nazwisko, data) in ("D", "DN")
@@ -331,36 +431,26 @@ def faza_3_obsada(
             if state.get_przydzial(p.imie_nazwisko, data) in ("N", "DN")
         )
 
-        brak_d = max(0, norm.day_shifts - obsada_d)
+        brak_d = max(0, min_d_hard - obsada_d)
         brak_n = max(0, norm.night_shifts - obsada_n)
 
-        # Przydziel brakujące D
-        for _ in range(brak_d):
-            kandydaci = [
-                (score_pracownik(p, data, "D", state), p)
-                for p in etatowcy
-                if state.get_przydzial(p.imie_nazwisko, data) == ""
-            ]
-            kandydaci = [(s, p) for s, p in kandydaci if s > float("-inf")]
-            if not kandydaci:
-                break
-            kandydaci.sort(key=lambda x: x[0], reverse=True)
-            _, najlepszy = kandydaci[0]
-            state.przydziel(najlepszy.imie_nazwisko, data, "D")
+        # Krok 1: spróbuj uzupełnić etatowcami
+        _przydziel_brakujacych(data, brak_d, "D", etatowcy)
+        _przydziel_brakujacych(data, brak_n, "N", etatowcy)
 
-        # Przydziel brakujące N
-        for _ in range(brak_n):
-            kandydaci = [
-                (score_pracownik(p, data, "N", state), p)
-                for p in etatowcy
-                if state.get_przydzial(p.imie_nazwisko, data) == ""
-            ]
-            kandydaci = [(s, p) for s, p in kandydaci if s > float("-inf")]
-            if not kandydaci:
-                break
-            kandydaci.sort(key=lambda x: x[0], reverse=True)
-            _, najlepszy = kandydaci[0]
-            state.przydziel(najlepszy.imie_nazwisko, data, "N")
+        # Krok 2: jeśli wciąż brakuje, dopełnij kontraktami
+        obsada_d2 = sum(
+            1 for p in state.pracownicy
+            if state.get_przydzial(p.imie_nazwisko, data) in ("D", "DN")
+        )
+        obsada_n2 = sum(
+            1 for p in state.pracownicy
+            if state.get_przydzial(p.imie_nazwisko, data) in ("N", "DN")
+        )
+        brak_d2 = max(0, min_d_hard - obsada_d2)
+        brak_n2 = max(0, norm.night_shifts - obsada_n2)
+        _przydziel_brakujacych(data, brak_d2, "D", kontrakty)
+        _przydziel_brakujacych(data, brak_n2, "N", kontrakty)
 
 
 # ---------------------------------------------------------------------------
@@ -397,20 +487,27 @@ def faza_3b_uzupelnianie(
     while zmiana_nastapila:
         zmiana_nastapila = False
 
-        for p in etatowcy:
+        # Kolejność: pracownicy z mniejszą liczbą zmian najpierw (równomierne rozłożenie)
+        etatowcy_posortowani = sorted(
+            etatowcy,
+            key=lambda x: (len(state.przydzial[x.imie_nazwisko]), x.imie_nazwisko),
+        )
+
+        for p in etatowcy_posortowani:
             imie = p.imie_nazwisko
             normatyw = state.normatywy[imie]
 
             if state.pozostale_minuty(imie) < FULL_SHIFT_MINUTES:
                 continue
 
-            # Zbierz dni, gdzie pracownik może dostać D lub N, z posortowaniem
-            # po aktualnej obsadzie (rosnąco) – preferuj dni z mniejszą obsadą
+            # Zbierz dni, gdzie pracownik może dostać D lub N
+            # Sortowanie: 1) mniejsza obsada (unika tłumów), 2) większa luka (równomierne rozłożenie)
             kandydaci_d = []
             kandydaci_n = []
             for data in state.dni:
                 if state.get_przydzial(imie, data) != "":
                     continue
+                luka = _rozmiar_luki_pracownika(imie, data, state)
                 obs_d = state.liczba_na_dzien(data, "D")
                 obs_n = state.liczba_na_dzien(data, "N")
                 if obs_d < max_d and czy_mozna_przydzielic(
@@ -419,23 +516,27 @@ def faza_3b_uzupelnianie(
                     normatyw.minuty, normatyw.koncowka_minuty,
                     data.year, data.month,
                 ):
-                    kandydaci_d.append((obs_d, data))
+                    dni_od = _dni_od_ostatniej_zmiany(imie, data, state)
+                    kara = 200 if dni_od <= 1 else 0  # unikaj dnia po zmianie
+                    kandydaci_d.append((obs_d, -luka, kara, data))
                 if obs_n < max_n and czy_mozna_przydzielic(
                     p, data, "N",
                     state.przydzial[imie], state.przepracowane[imie],
                     normatyw.minuty, normatyw.koncowka_minuty,
                     data.year, data.month,
                 ):
-                    kandydaci_n.append((obs_n, data))
+                    dni_od = _dni_od_ostatniej_zmiany(imie, data, state)
+                    kara = 200 if dni_od <= 1 else 0
+                    kandydaci_n.append((obs_n, -luka, kara, data))
 
-            # Sortuj: dni z mniejszą obsadą pierwsze (rozkład zamiast tłumów)
-            kandydaci_d.sort(key=lambda x: x[0])
-            kandydaci_n.sort(key=lambda x: x[0])
+            # Sortuj: obsada, luka, unikaj kolejnego dnia, data
+            kandydaci_d.sort(key=lambda x: (x[0], x[1], x[2]))
+            kandydaci_n.sort(key=lambda x: (x[0], x[1], x[2]))
 
             for kod, kandydaci in (("D", kandydaci_d), ("N", kandydaci_n)):
                 if not kandydaci:
                     continue
-                _, data = kandydaci[0]
+                _, _, _, data = kandydaci[0]
                 state.przydziel(imie, data, kod)
                 zmiana_nastapila = True
                 break
@@ -497,6 +598,75 @@ def faza_4_koncowki(
 
 
 # ---------------------------------------------------------------------------
+# Faza 5: Uzupełnienie pustych dni (fallback gdy 0 osób na dobę)
+# ---------------------------------------------------------------------------
+
+def _liczba_osob_na_dzien(state: HarmonogramState, data: datetime.date) -> int:
+    """Liczba osób z jakąkolwiek zmianą roboczą (D/N/DN/R/DK) w danym dniu."""
+    return sum(
+        1 for p in state.pracownicy
+        if state.get_przydzial(p.imie_nazwisko, data) in WORKING_SHIFTS
+    )
+
+
+def faza_5_uzupelnij_puste_dni(
+    state: HarmonogramState,
+    norm: object,
+) -> None:
+    """
+    Dla każdego dnia miesiąca sprawdza, czy jest co najmniej 1 osoba na zmianie.
+    Jeśli dzień ma 0 osób – uzupełnia awaryjnie. Najpierw próbuje bez nadgodzin;
+    jeśli niemożliwe, przypisuje pracownika z najmniejszym przekroczeniem normatywu.
+    Dla etatowców zawsze weryfikuje bilans, aby nie tworzyć nadgodzin bez konieczności.
+    """
+    for data in state.dni:
+        if _liczba_osob_na_dzien(state, data) >= 1:
+            continue
+
+        # Dzień całkowicie pusty – dwie próby: (1) bez nadgodzin, (2) emergency
+        for allow_overtime in (False, True):
+            assigned = False
+            # Sortuj: najpierw ci z największym niedoborem (lub najmniejszą nadwyżką)
+            kandydaci = sorted(
+                state.pracownicy,
+                key=lambda p: state.przepracowane[p.imie_nazwisko] - state.normatywy[p.imie_nazwisko].minuty
+            )
+            for p in kandydaci:
+                imie = p.imie_nazwisko
+                if data in p.niedyspozycje:
+                    continue
+                if state.get_przydzial(imie, data) != "":
+                    continue
+                if data.weekday() >= 5 and not p.pracuje_w_weekendy:
+                    continue
+                if czy_swieto(data, state.swieta) and not p.pracuje_w_weekendy:
+                    continue
+
+                # Tylko_7h: R tylko w dni robocze
+                if p.tylko_7h:
+                    if data.weekday() < 5 and not czy_swieto(data, state.swieta):
+                        state.przydziel(imie, data, "R")
+                        assigned = True
+                    break
+
+                # Sprawdź bilans (bez nadgodzin w pierwszej próbie)
+                normatyw = state.normatywy[imie]
+                if not allow_overtime and p.is_etat:
+                    if state.przepracowane[imie] + FULL_SHIFT_MINUTES > normatyw.minuty:
+                        continue  # Pomiń – nadgodziny
+
+                obs_d = state.liczba_na_dzien(data, "D")
+                obs_n = state.liczba_na_dzien(data, "N")
+                kod = "D" if obs_d <= obs_n else "N"
+                state.przydziel(imie, data, kod)
+                assigned = True
+                break
+
+            if assigned:
+                break
+
+
+# ---------------------------------------------------------------------------
 # Główna funkcja generowania harmonogramu dla jednej grupy
 # ---------------------------------------------------------------------------
 
@@ -542,6 +712,9 @@ def generuj_harmonogram_grupy(
 
     # Faza 4: Końcówki DK
     faza_4_koncowki(state)
+
+    # Faza 5: Uzupełnienie pustych dni (gdy żadna osoba nie ma zmiany)
+    faza_5_uzupelnij_puste_dni(state, norm)
 
     return state
 
