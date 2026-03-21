@@ -216,16 +216,19 @@ def faza_2_kontrakty(state: HarmonogramState, norm: object) -> None:
     for p in kontrakty_posortowane:
         imie = p.imie_nazwisko
         normatyw = state.normatywy[imie]
-        potrzebne = max(1, (normatyw.minuty + FULL_SHIFT_MINUTES - 1) // FULL_SHIFT_MINUTES)
+        # Kontraktowcy preferują DN (24h), więc szacujemy liczbę zmian jednostkami 24h
+        potrzebne = max(1, (normatyw.minuty + FULL_SHIFT_MINUTES * 2 - 1) // (FULL_SHIFT_MINUTES * 2))
 
         def _klucz_dnia(d):
             n_zmian = sum(1 for k in state.przydzial[imie].values() if k in WORKING_SHIFTS)
             obs = state.liczba_na_dzien(d, "D") + state.liczba_na_dzien(d, "N")
             luka = _rozmiar_luki_pracownika(imie, d, state)
-            ideal = n_zmian * len(state.dni) / potrzebne if potrzebne else 0
+            # +0.5 przesuwa idealną pozycję do środka przedziału, nie na początek miesiąca
+            ideal = (n_zmian + 0.5) * len(state.dni) / potrzebne if potrzebne else 0
             od_ideal = abs(state.dni.index(d) - ideal)
             kara = 200 if _dni_od_ostatniej_zmiany(imie, d, state) <= 1 else 0
-            return (obs, -luka, kara, od_ideal)
+            # od_ideal na 1. miejscu → równomierność jest kryterium głównym
+            return (od_ideal, obs, kara, -luka)
 
         while state.przepracowane[imie] < normatyw.minuty:
             kandydaci = []
@@ -298,6 +301,12 @@ def faza_3_obsada(state: HarmonogramState, norm: object) -> None:
     kontrakty = [p for p in state.pracownicy if p.is_kontrakt and not p.tylko_7h]
     min_d = norm.day_shifts_min if norm.day_shifts_min > 0 else norm.day_shifts
 
+    # Minimalna liczba UNIKALNYCH pracowników na dobę:
+    # zmiana DN (24h) liczy się jako D i N jednocześnie, więc 1 osoba może
+    # pozornie spełnić oba minimia – wymagamy co najmniej 2 różnych osób
+    # gdy harmonogram potrzebuje zarówno D jak i N.
+    min_unique = 2 if (min_d > 0 and norm.night_shifts > 0) else 0
+
     for data in state.dni:
         for kod, min_obs in (("D", min_d), ("N", norm.night_shifts)):
             brak = max(0, min_obs - _policz_obsade(state, data, kod))
@@ -307,6 +316,23 @@ def faza_3_obsada(state: HarmonogramState, norm: object) -> None:
             brak2 = max(0, min_obs - _policz_obsade(state, data, kod))
             for _ in range(brak2):
                 _przydziel_najlepszego(state, data, kod, kontrakty)
+
+        # Krok 3: zapewnij minimalną liczbę unikalnych osób na dobę
+        if min_unique > 0:
+            pula = etatowcy + kontrakty
+            prev_unique = -1
+            while True:
+                unique = sum(
+                    1 for p in state.pracownicy
+                    if state.get_przydzial(p.imie_nazwisko, data) in WORKING_SHIFTS
+                )
+                if unique >= min_unique or unique == prev_unique:
+                    break
+                prev_unique = unique
+                for typ in ("D", "N"):
+                    if _policz_obsade(state, data, typ) < _get_max_shifts(norm, typ):
+                        _przydziel_najlepszego(state, data, typ, pula)
+                        break
 
 
 # === Faza 3b: Uzupełnianie niedoborów godzin etatowców ===
@@ -338,11 +364,15 @@ def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
             # Zbierz i posortuj kandydujące dni dla D i N
             najlepszy = None
             najlepszy_klucz = None
+            n_juz = sum(1 for k in state.przydzial[imie].values() if k in WORKING_SHIFTS)
+            total_pot = max(1, (normatyw.minuty + FULL_SHIFT_MINUTES - 1) // FULL_SHIFT_MINUTES)
             for data in state.dni:
                 if state.get_przydzial(imie, data) != "":
                     continue
                 luka = _rozmiar_luki_pracownika(imie, data, state)
                 kara = 200 if _dni_od_ostatniej_zmiany(imie, data, state) <= 1 else 0
+                ideal = (n_juz + 0.5) * len(state.dni) / total_pot
+                od_ideal = abs(state.dni.index(data) - ideal)
                 for kod, max_obs in (("D", max_d), ("N", max_n)):
                     obs = _policz_obsade(state, data, kod)
                     if obs < max_obs and czy_mozna_przydzielic(
@@ -351,7 +381,7 @@ def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
                         normatyw.minuty, normatyw.koncowka_minuty,
                         data.year, data.month,
                     ):
-                        klucz = (obs, -luka, kara, kod)
+                        klucz = (od_ideal, obs, kara, -luka)
                         if najlepszy_klucz is None or klucz < najlepszy_klucz:
                             najlepszy_klucz = klucz
                             najlepszy = (imie, data, kod)
