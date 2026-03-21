@@ -159,35 +159,39 @@ def sprawdz_co_4_niedziela(
     miesiac: int,
 ) -> bool:
     """
-    Jeśli 'data' jest niedzielą, sprawdza, czy pracownik miał wolną niedzielę
-    w ciągu ostatnich 3 niedziel. Jeśli tak (= ta niedziela jest <= 3. z rzędu),
-    dodatkowa zmiana jest dozwolona. Jeśli miał 3 kolejne pracujące niedziele,
-    ta musi być wolna.
+    Jeśli 'data' jest niedzielą, sprawdza czy przydzielenie zmiany nie spowoduje
+    4 (lub więcej) kolejnych roboczych niedziel w serii.
+
+    Algorytm:
+      - Liczy ile kolejnych roboczych niedziel jest PRZED 'data' (wstecz).
+      - Liczy ile kolejnych roboczych niedziel jest JUŻ PRZYDZIELONYCH PO 'data'
+        (w przód – eliminuje tworzenie serii "od tyłu" przez fazy uzupełniające).
+      - Łączna seria = wstecz + 1 + wprzód. Dozwolone: seria <= 3.
 
     Zwraca True, jeśli można przydzielić zmianę.
     """
     if data.weekday() != 6:
-        return True  # Nie jest niedzielą – ograniczenie nie dotyczy
+        return True
 
-    # Nie dotyczy kodów wolnych
     if nowy_kod not in WORKING_SHIFTS:
         return True
 
-    # Sprawdź 3 poprzednie niedziele
-    niedziele_z_praca = 0
-    for n in range(1, 4):
-        prev_sunday = data - datetime.timedelta(weeks=n)
-        if prev_sunday.month != miesiac and prev_sunday.year != rok:
-            # Poza zakresem miesiąca – zakładamy brak informacji (OK)
-            break
-        kod = przydzial.get(prev_sunday, "")
-        if kod in WORKING_SHIFTS:
-            niedziele_z_praca += 1
-        else:
-            break  # Przerwa w ciągu pracy – reset licznika
+    def _licz_z_kierunku(kierunek: int) -> int:
+        """Liczy kolejne robocze niedziele w zadanym kierunku (±1 tygodnia)."""
+        licznik = 0
+        for n in range(1, 4):
+            nd = data + datetime.timedelta(weeks=n * kierunek)
+            # Poza zakresem bieżącego miesiąca – przerywamy (brak danych = wolne)
+            if nd.month != miesiac or nd.year != rok:
+                break
+            if przydzial.get(nd, "") in WORKING_SHIFTS:
+                licznik += 1
+            else:
+                break
+        return licznik
 
-    # Jeśli 3 niedziele z rzędu miał pracę, ta musi być wolna
-    return niedziele_z_praca < 3
+    seria = _licz_z_kierunku(-1) + 1 + _licz_z_kierunku(+1)
+    return seria <= 3
 
 
 # ---------------------------------------------------------------------------

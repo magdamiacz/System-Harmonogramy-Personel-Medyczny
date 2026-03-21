@@ -2,6 +2,20 @@
 
 ## 1. Definicja problemu
 
+### Kontekst szpitalny
+
+System obsługuje **trzy oddziały szpitalne**: gastrologiczny, wewnętrzny oraz OIOK. Dla każdego oddziału generowane są oddzielne harmonogramy dla pielęgniarek i opiekunek. Opiekunki oddziałów wewnętrznego i OIOK prowadzą wspólny harmonogram. Łącznie powstaje **5 harmonogramów**:
+
+| Klucz harmonogramu | Oddział | Rola |
+|--------------------|---------|------|
+| `gastro_piel` | Gastrologiczny | Pielęgniarki (2D + 2N + 1R na dobę) |
+| `gastro_opiek` | Gastrologiczny | Opiekunki (1–2D + 1N na dobę) |
+| `wew_piel` | Wewnętrzny | Pielęgniarki (2D + 2N na dobę) |
+| `oiok_piel` | OIOK | Pielęgniarki (1D + 1N + 1R na dobę) |
+| `wew_oiok_opiek` | Wewnętrzny + OIOK | Opiekunki wspólnie (2D + 2N na dobę) |
+
+### Formalizacja
+
 Problem generowania harmonogramów pracy dla personelu medycznego należy do klasy problemów NP-trudnych. Formalizując: mamy zbiór pracowników `P`, zbiór dni `D` (np. 31 dni miesiąca), zbiór typów zmian `S = {D, N, DN, R, DK}` oraz zbiór ograniczeń `C`. Szukamy funkcji przydziału `f: P × D → S ∪ {∅}` takiej, że:
 
 - każdego dnia spełnione są normy obsady dla każdego oddziału,
@@ -33,7 +47,7 @@ Do rozwiązania problemu zastosowano **heurystykę zachłanną** (ang. *greedy a
 | C4 | Przerwa od końca poprzedniej zmiany do początku nowej < 12h |
 | C5 | Etatowiec: suma godzin w tygodniu po dodaniu zmiany > 36h |
 | C6 | Etatowiec: suma godzin po dodaniu zmiany > normatyw (nadgodziny) |
-| C7 | Etatowiec: 3 kolejne niedziele robocze → następna niedziela musi być wolna |
+| C7 | Co 4. niedziela musi być wolna – po 3 kolejnych niedzielach roboczych następna niedziela jest zablokowana (dotyczy wszystkich pracowników) |
 
 ### Ograniczenia miękkie (optymalizowane przez funkcję scoring)
 
@@ -65,7 +79,8 @@ Do rozwiązania problemu zastosowano **heurystykę zachłanną** (ang. *greedy a
 5. Rozłóż normatyw etatowca na zmiany:
    - pelne_12h = N_min // 720 min
    - końcówka = N_min % 720 min (np. 7h40min)
-6. Zgrupuj pracowników wg harmonogramu (5 grup)
+6. Zgrupuj pracowników wg harmonogramu (5 grup):
+   - gastro_piel, gastro_opiek, wew_piel, oiok_piel, wew_oiok_opiek
 ```
 
 ### Faza 1: Przydzielanie zmian R (7:00–14:35)
@@ -230,7 +245,9 @@ JEŚLI etat AND NOT tylko_7h:
     JEŚLI pozostalo_w_tygodniu < 12h:
         score -= 15             # ta zmiana wyczerpuje tydzień → kara
 
-# Kryterium 7 (S7): rotacja niedzielna
+# Kryterium 7 (S7): rotacja niedzielna (wspiera ograniczenie C7)
+# Cel: unikać sytuacji, w której pracownik przepracowałby 3 niedziele z rzędu
+# i nie miałby wolnej 4. niedzieli w miesiącu.
 JEŚLI data jest niedzielą:
     JEŚLI pracownik miał dyżur w poprzednią niedzielę AND dwie niedziele temu
        AND następna niedziela jest w tym samym miesiącu:
