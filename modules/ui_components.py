@@ -10,7 +10,13 @@ from typing import Dict, List, Optional, Set
 import pandas as pd
 import streamlit as st
 
-from config import SHIFT_DURATIONS, WORKING_SHIFTS, WORK_MINUTES_PER_DAY_STANDARD
+from config import (
+    FULL_SHIFT_MINUTES,
+    SHIFT_DURATIONS,
+    WORK_MINUTES_PER_DAY_DISABILITY,
+    WORK_MINUTES_PER_DAY_STANDARD,
+    WORKING_SHIFTS,
+)
 from modules.data_loader import Pracownik
 from modules.holidays import czy_swieto, czy_weekend, czy_niedziela
 from modules.normative import _minuty_na_str
@@ -18,14 +24,14 @@ from modules.scheduler import HarmonogramState, oblicz_podsumowanie
 
 
 # ---------------------------------------------------------------------------
-# Kolory kolumn: weekend = bordowy, święto = czerwony
+# Kolory kolumn: weekend = szary (#636363), święto = czerwony (#B31515)
 # ---------------------------------------------------------------------------
 
-KOLOR_KOLUMNY_WEEKEND = "#4F1C12"   # Bordowy
-KOLOR_KOLUMNY_SWIETO  = "#ffe0e0"   # Jasny czerwony
+KOLOR_KOLUMNY_WEEKEND = "#636363"   # Szary
+KOLOR_KOLUMNY_SWIETO  = "#B31515"   # Czerwony
 
 # Kolory ciemne – wymagają jasnego tekstu dla czytelności
-KOLORY_CIEMNE = {"#4f1c12", "#190e87"}
+KOLORY_CIEMNE = {"#636363", "#b31515", "#12196b", "#731a6e", "#9c6b10", "#5f6639"}
 
 
 # ---------------------------------------------------------------------------
@@ -33,11 +39,11 @@ KOLORY_CIEMNE = {"#4f1c12", "#190e87"}
 # ---------------------------------------------------------------------------
 
 KOLOR_ZMIANY: Dict[str, str] = {
-    "D":  "#c8e6c9",   # Zielony – dyżur dzienny
-    "N":  "#bbdefb",   # Niebieski – dyżur nocny
-    "DN": "#190E87",   # Ciemny niebieski – całodobowy (kontrakt)
-    "R":  "#dcedc8",   # Jasnozielony – zmiana robocza 7h35
-    "DK": "#ffe0b2",   # Pomarańczowy – końcówka
+    "D":  "#118249",   # Zielony – dyżur dzienny
+    "N":  "#12196B",   # Ciemny niebieski – dyżur nocny
+    "DN": "#731A6E",   # Fioletowy – całodobowy (kontrakt)
+    "R":  "#5F6639",   # Oliwkowy – zmiana robocza 7h35
+    "DK": "#9C6B10",   # Brązowy – końcówka
     "U":  "#ffcdd2",   # Czerwony – urlop
     "UM": "#f8bbd0",   # Różowy – urlop macierzyński
     "W":  "#eeeeee",   # Szary – wolne
@@ -172,8 +178,6 @@ def buduj_tekst_normatywu(
     Zwraca tekst do nagłówka nad tabelą: jak obliczany jest normatyw
     i jaka wychodzi końcówka do przypisania.
     """
-    from config import WORK_MINUTES_PER_DAY_STANDARD, WORK_MINUTES_PER_DAY_DISABILITY, FULL_SHIFT_MINUTES
-
     # Reprezentatywny normatyw etatowy (zwykły pracownik)
     normatyw_min = liczba_dni_roboczych * WORK_MINUTES_PER_DAY_STANDARD
     pelne = normatyw_min // FULL_SHIFT_MINUTES
@@ -206,30 +210,16 @@ def rekalkuluj_state_po_edycji(
     Aktualizuje HarmonogramState na podstawie edytowanej tabeli.
     Zeruje przepracowane minuty i liczy od nowa z nowych przydziałów.
     """
-    NAZWY_DNI_MAP = {f"Pn {d.day}": d for d in dni}
-    NAZWY_DNI_MAP.update({f"Wt {d.day}": d for d in dni})
-    NAZWY_DNI_MAP.update({f"Śr {d.day}": d for d in dni})
-    NAZWY_DNI_MAP.update({f"Cz {d.day}": d for d in dni})
-    NAZWY_DNI_MAP.update({f"Pt {d.day}": d for d in dni})
-    NAZWY_DNI_MAP.update({f"So {d.day}": d for d in dni})
-    NAZWY_DNI_MAP.update({f"Nd {d.day}": d for d in dni})
-
-    # Zbuduj mapę nagłówek -> data
     NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
-    col_to_date = {}
-    for d in dni:
-        col = f"{NAZWY_DNI[d.weekday()]} {d.day}"
-        col_to_date[col] = d
+    col_to_date = {f"{NAZWY_DNI[d.weekday()]} {d.day}": d for d in dni}
 
     # Zeruj liczniki
     for p in state.pracownicy:
         imie = p.imie_nazwisko
         state.przydzial[imie] = {}
-        state.przepracowane[imie] = 0
-        state.liczba_nocnych[imie] = 0
-        state.liczba_weekendowych[imie] = 0
-        state.liczba_swiatecznych[imie] = 0
-        state.liczba_dziennych[imie] = 0
+        for attr in ("przepracowane", "liczba_nocnych", "liczba_weekendowych",
+                     "liczba_swiatecznych", "liczba_dziennych"):
+            getattr(state, attr)[imie] = 0
 
     # Wczytaj nowe przydziały
     for _, row in df_edytowany.iterrows():
@@ -266,7 +256,7 @@ def renderuj_harmonogram(
 ) -> Optional[HarmonogramState]:
     """
     Wyświetla tabelę harmonogramu z kolorowaniem oraz edytor poniżej.
-    Górna tabela (st.dataframe) pokazuje kolory: bordowy = weekend, czerwony = święto.
+    Górna tabela (st.dataframe) pokazuje kolory: szary = weekend, czerwony = święto.
     Edytor (st.data_editor) umożliwia ręczne poprawki.
     Po edycji zwraca zaktualizowany HarmonogramState, w przeciwnym razie None.
     """
@@ -281,7 +271,7 @@ def renderuj_harmonogram(
     with col_leg1:
         st.caption(
             "🟤 weekend (So/Nd)  |  🔴 święto  "
-            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=ciemny niebieski, R=limonka, DK=pomarańczowy)"
+            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=fioletowy, R=zielony, DK=brązowy)"
         )
     with col_leg2:
         with st.expander("Legenda kodów zmian"):

@@ -8,24 +8,33 @@ from typing import Set
 
 def _oblicz_wielkanoc(rok: int) -> datetime.date:
     """
-    Oblicza datę Niedzieli Wielkanocnej algorytmem anonimowym z 1876 r.
-    (tzw. algorytm Meeusa/Jonesa/Butchera).
+    Oblicza datę Niedzieli Wielkanocnej Gaussowską Formułą Wielkanocną
+    (Gaußsche Osterformel, C.F. Gauss, ok. 1800 r.).
+
+    Zmienne:
+        M — epakta stulecia (dni do pełni księżyca)
+        N — korekta dnia tygodnia stulecia
+        d — liczba dni od 21 marca do pełni księżyca
+        e — korekta do najbliższej niedzieli po pełni
     """
     a = rok % 19
-    b = rok // 100
-    c = rok % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    miesiac = (h + l - 7 * m + 114) // 31
-    dzien = ((h + l - 7 * m + 114) % 31) + 1
-    return datetime.date(rok, miesiac, dzien)
+    b = rok % 4
+    c = rok % 7
+    k = rok // 100
+    p = (13 + 8 * k) // 25
+    q = k // 4
+    M = (15 - p + k - q) % 30
+    N = (4 + k - q) % 7
+    d = (19 * a + M) % 30
+    e = (2 * b + 4 * c + 6 * d + N) % 7
+    if d + e < 10:
+        return datetime.date(rok, 3, 22 + d + e)
+    dzien = d + e - 9
+    if dzien == 26:
+        dzien = 19
+    if dzien == 25 and d == 28 and e == 6 and a > 10:
+        dzien = 18
+    return datetime.date(rok, 4, dzien)
 
 
 def pobierz_swieta(rok: int) -> Set[datetime.date]:

@@ -70,7 +70,7 @@ Do rozwiązania problemu zastosowano **heurystykę zachłanną** (ang. *greedy a
 2. Wczytaj niedyspozycje z CSV (opcjonalnie)
 3. Oblicz informacje o miesiącu:
    - lista dni, liczba dni roboczych
-   - zbiór świąt polskich (stałe + Wielkanoc + Boże Ciało)
+   - zbiór świąt polskich (stałe + Wielkanoc obliczona Gaussowską Formułą Wielkanocną + Boże Ciało)
 4. Oblicz normatywy dla każdego pracownika:
    - etat zwykły: dni_robocze × 7h35min = N_min minut
    - etat z orzeczeniem: dni_robocze × 7h00min

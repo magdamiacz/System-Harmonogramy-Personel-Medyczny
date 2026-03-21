@@ -426,11 +426,8 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
     Jeśli dzień ma 0 osób na zmianie, awaryjnie przydziela kogoś.
     Próba 1: bez nadgodzin. Próba 2: z minimalnym przekroczeniem normatywu.
     """
-    def _osob_na_dzien(data):
-        return sum(1 for p in state.pracownicy if state.get_przydzial(p.imie_nazwisko, data) in WORKING_SHIFTS)
-
     for data in state.dni:
-        if _osob_na_dzien(data) >= 1:
+        if any(state.get_przydzial(p.imie_nazwisko, data) in WORKING_SHIFTS for p in state.pracownicy):
             continue
 
         for allow_overtime in (False, True):

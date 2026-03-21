@@ -94,11 +94,7 @@ def wczytaj_personel(source) -> Tuple[List[Pracownik], List[str]]:
 
     # Wczytaj DataFrame
     try:
-        if isinstance(source, (str,)):
-            df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
-        else:
-            # Streamlit UploadedFile lub BytesIO
-            df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
+        df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
     except Exception as e:
         raise ValueError(f"Nie można wczytać pliku personelu: {e}")
 
@@ -178,10 +174,7 @@ def wczytaj_niedyspozycje(
     known_names = {p.imie_nazwisko for p in pracownicy}
 
     try:
-        if isinstance(source, str):
-            df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
-        else:
-            df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
+        df = pd.read_csv(source, encoding="utf-8", sep=",", skipinitialspace=True)
     except Exception as e:
         raise ValueError(f"Nie można wczytać pliku niedyspozycji: {e}")
 
@@ -232,7 +225,5 @@ def grupuj_wg_harmonogramu(
     """
     grupy: Dict[str, List[Pracownik]] = {}
     for p in pracownicy:
-        if p.schedule_key not in grupy:
-            grupy[p.schedule_key] = []
-        grupy[p.schedule_key].append(p)
+        grupy.setdefault(p.schedule_key, []).append(p)
     return grupy
