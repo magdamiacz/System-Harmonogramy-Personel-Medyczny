@@ -87,9 +87,7 @@ with st.sidebar:
         key="generuj_btn",
     )
 
-    # Link do opisu heurystyki
     st.divider()
-    st.markdown("📄 [Opis algorytmu (heurystyka.md)](heurystyka.md)")
 
 
 # ---------------------------------------------------------------------------
