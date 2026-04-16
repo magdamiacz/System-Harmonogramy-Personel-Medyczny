@@ -44,7 +44,7 @@ Do rozwiązania problemu zastosowano **heurystykę zachłanną** (ang. *greedy a
 | C1 | Pracownik jest niedyspozycyjny w danym dniu (CSV niedyspozycji) |
 | C2 | Pracownik ma już przydzieloną zmianę w danym dniu |
 | C3 | Flaga `pracuje_w_weekendy = nie` + data jest sobotą/niedzielą |
-| C4 | Przerwa od końca poprzedniej zmiany do początku nowej < 12h |
+| C4 | Przerwa między zmianami < 12h – sprawdzana **dwukierunkowo**: od końca poprzedniej do początku nowej ORAZ od końca nowej do początku następnej już przydzielonej zmiany |
 | C5 | Etatowiec: suma godzin w tygodniu po dodaniu zmiany > 36h |
 | C6 | Etatowiec: suma godzin po dodaniu zmiany > normatyw (nadgodziny) |
 | C7 | Co 4. niedziela musi być wolna – po 3 kolejnych niedzielach roboczych następna niedziela jest zablokowana (dotyczy wszystkich pracowników) |
@@ -112,12 +112,15 @@ DLA KAŻDEGO kontraktowca (w powyższej kolejności):
       - pomijaj dni zajęte lub niedostępne (ograniczenia twarde)
       - respektuj limit max_day_shifts / max_night_shifts (bez tłumów)
     DLA KAŻDEGO kandydującego dnia oblicz klucz sortowania:
-      klucz = (obsada_dnia, -luka, kara_kolejny, od_idealnej_pozycji)
-        obsada_dnia  – łączna bieżąca obsada D+N (im mniejsza, tym lepiej)
-        luka         – rozmiar luki między sąsiednimi zmianami pracownika
-                       (im większa luka, tym bardziej „potrzebny" jest tam dzień)
-        kara_kolejny – 200 gdy dzień następuje bezpośrednio po zmianie (unikanie skupisk)
-        od_ideal     – odległość od idealnie równomiernej pozycji w miesiącu
+      klucz = (unique_people, od_ideal, obsada_dnia, kara_kolejny, -luka)
+        unique_people – liczba unikalnych pracowników w tej samej grupie,
+                         którzy w dniu mają jakąkolwiek zmianę roboczą
+                         (kod ∈ WORKING_SHIFTS: D, N, DN, R, DK)
+        od_ideal       – odległość od idealnie równomiernej pozycji w miesiącu
+        obsada_dnia    – łączna bieżąca obsada D+N (im mniejsza, tym lepiej)
+        kara_kolejny   – 200 gdy dzień następuje bezpośrednio po zmianie (unikanie skupisk)
+        luka           – rozmiar luki między sąsiednimi zmianami pracownika
+                         (większa luka → bardziej „potrzebny" dzień, dlatego -luka)
     WYBIERZ dzień+kod z NAJNIŻSZYM kluczem → PRZYDZIEL zmianę
 ```
 
@@ -169,7 +172,11 @@ POWTARZAJ dopóki jakikolwiek etatowiec ma niedobór ≥ 12h:
     ZBIERZ wolne dni, w które można przydzielić D lub N:
       - respektuj ograniczenia twarde (przerwa 12h, 36h/tydz., normatyw)
       - respektuj limit max_day_shifts / max_night_shifts (bez tłumów)
-    DLA KAŻDEGO kandydującego dnia oblicz klucz: (obsada, -luka, kara_kolejny)
+    DLA KAŻDEGO kandydującego dnia oblicz klucz: (obsada, kara_kolejny, -luka, od_ideal)
+      obsada     – bieżąca obsada D lub N w tym dniu (im mniejsza, tym lepiej – unikaj tłoku)
+      kara_kolejny – 200 gdy dzień następuje bezpośrednio po zmianie
+      luka       – rozmiar luki między sąsiednimi zmianami (większa → lepiej, dlatego -luka)
+      od_ideal   – odległość od idealnej pozycji w miesiącu (tylko tiebreaker)
     WYBIERZ najlepszy dzień → PRZYDZIEL D lub N
 ```
 
@@ -182,10 +189,16 @@ Po przydzieleniu dyżurów 12h część etatowców ma niedobór mniejszy niż 12
 ```
 DLA KAŻDEGO etatowca zmianowego:
   JEŚLI normatyw.końcówka > 0 AND przepracowane < normatyw:
-    SZUKAJ pierwszego wolnego dnia roboczego (pn–pt, nie święto):
-      JEŚLI przerwa 12h spełniona:
-        PRZYDZIEL zmianę DK (o długości = końcówka minut)
-        BREAK
+    ZBIERZ kandydat-dni = {dni robocze pn–pt, nie święta, gdzie pracownik nie ma jeszcze przydziału
+    oraz czy_mozna_przydzielic(..., "DK", ...) zwraca True}.
+
+    DLA każdego kandydata d:
+      tlum_na_dobie = liczba osób z jakąkolwiek zmianą roboczą w dniu d
+      od_ideal = |indeks(d) - ideal|, gdzie ideal zależy od liczby już przydzielonych bloków 12h
+                  (D+DN, N+DN liczą się jako osobne bloki) względem normatyw.pelne_dyzury_12h.
+
+    wybierz d z minimalnym kluczem (tlum_na_dobie, od_ideal)
+    PRZYDZIEL DK (o długości = końcówka minut)
 ```
 
 ### Faza 5: Uzupełnienie pustych dni (fallback awaryjny)
@@ -202,6 +215,9 @@ DLA KAŻDEGO dnia miesiąca:
     DLA KAŻDEGO pracownika (w powyższej kolejności):
       JEŚLI niedyspozycja LUB zajęty LUB weekendowe ograniczenie → POMIŃ
       JEŚLI etat AND przepracowane + 12h > normatyw → POMIŃ
+      JEŚLI NOT sprawdz_co_4_niedziela(...) → POMIŃ
+      JEŚLI NOT sprawdz_przerwe_12h(...) → POMIŃ          # C4 wstecz
+      JEŚLI NOT sprawdz_przerwe_12h_nastepna(...) → POMIŃ  # C4 wprzód
       PRZYDZIEL D lub N (w zależności od aktualnej obsady D vs N) → BREAK
 
   PRÓBA 2 (emergency – jeśli Próba 1 się nie powiodła):

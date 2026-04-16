@@ -19,7 +19,7 @@ from config import (
     WORK_MINUTES_PER_DAY_STANDARD,
     WORKING_SHIFTS,
 )
-from modules.constraints import czy_mozna_przydzielic, oblicz_godziny_tygodnia, sprawdz_co_4_niedziela
+from modules.constraints import czy_mozna_przydzielic, oblicz_godziny_tygodnia, sprawdz_co_4_niedziela, sprawdz_przerwe_12h, sprawdz_przerwe_12h_nastepna
 from modules.data_loader import Pracownik
 from modules.holidays import czy_swieto, czy_weekend
 from modules.normative import Normatyw, oblicz_normatywy
@@ -221,14 +221,20 @@ def faza_2_kontrakty(state: HarmonogramState, norm: object) -> None:
 
         def _klucz_dnia(d):
             n_zmian = sum(1 for k in state.przydzial[imie].values() if k in WORKING_SHIFTS)
+            # "Tłok" na dobie: ilu pracowników w tej samej grupie ma jakąkolwiek zmianę roboczą
+            unique_people = sum(
+                1
+                for prac in state.pracownicy
+                if state.get_przydzial(prac.imie_nazwisko, d) in WORKING_SHIFTS
+            )
             obs = state.liczba_na_dzien(d, "D") + state.liczba_na_dzien(d, "N")
             luka = _rozmiar_luki_pracownika(imie, d, state)
             # +0.5 przesuwa idealną pozycję do środka przedziału, nie na początek miesiąca
             ideal = (n_zmian + 0.5) * len(state.dni) / potrzebne if potrzebne else 0
             od_ideal = abs(state.dni.index(d) - ideal)
             kara = 200 if _dni_od_ostatniej_zmiany(imie, d, state) <= 1 else 0
-            # od_ideal na 1. miejscu → równomierność jest kryterium głównym
-            return (od_ideal, obs, kara, -luka)
+            # unique_people na 1. miejscu → minimalizujemy napakowanie w czasie
+            return (unique_people, od_ideal, obs, kara, -luka)
 
         while state.przepracowane[imie] < normatyw.minuty:
             kandydaci = []
@@ -381,7 +387,7 @@ def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
                         normatyw.minuty, normatyw.koncowka_minuty,
                         data.year, data.month,
                     ):
-                        klucz = (od_ideal, obs, kara, -luka)
+                        klucz = (obs, kara, -luka, od_ideal)
                         if najlepszy_klucz is None or klucz < najlepszy_klucz:
                             najlepszy_klucz = klucz
                             najlepszy = (imie, data, kod)
@@ -395,28 +401,60 @@ def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
 
 def faza_4_koncowki(state: HarmonogramState) -> None:
     """Dodaje końcówkę DK etatowcom zmianowym z niedoborem < 12h."""
+    dni_index = {d: i for i, d in enumerate(state.dni)}
+
     for p in state.pracownicy:
         if not p.is_etat or p.tylko_7h:
             continue
+
         imie = p.imie_nazwisko
         normatyw = state.normatywy[imie]
         if normatyw.koncowka_minuty == 0 or state.przepracowane[imie] >= normatyw.minuty:
             continue
+
+        # Docelowa pozycja DK w miesiącu (na podstawie tego, ile 12h bloków pracownik ma już
+        # w rozkładzie: D+DN i N+DN liczą się jako osobne bloki).
+        n_juz_12h = state.liczba_dziennych[imie] + state.liczba_nocnych[imie]
+        potrzebne_12h = normatyw.pelne_dyzury_12h or 1
+        ideal = (n_juz_12h + 0.5) * len(state.dni) / potrzebne_12h
+
+        najlepszy_data = None
+        najlepszy_klucz = None  # (tłum_na_dobie, od_ideal)
+
         for data in state.dni:
+            # DK tylko w dni robocze (pn–pt) i nie na święto
             if data.weekday() >= 5 or czy_swieto(data, state.swieta):
                 continue
             if state.get_przydzial(imie, data) != "":
                 continue
-            if czy_mozna_przydzielic(
-                pracownik=p, data=data, nowy_kod="DK",
+            if not czy_mozna_przydzielic(
+                pracownik=p,
+                data=data,
+                nowy_kod="DK",
                 przydzial=state.przydzial[imie],
                 przepracowane_minuty=state.przepracowane[imie],
                 normatyw_minuty=normatyw.minuty,
                 koncowka_minuty=normatyw.koncowka_minuty,
-                rok=data.year, miesiac=data.month,
+                rok=data.year,
+                miesiac=data.month,
             ):
-                state.przydziel(imie, data, "DK")
-                break
+                continue
+
+            # Liczba osób pracujących na jakąkolwiek zmianę roboczą w tej dobie.
+            tlum_na_dobie = sum(
+                1
+                for prac in state.pracownicy
+                if state.get_przydzial(prac.imie_nazwisko, data) in WORKING_SHIFTS
+            )
+            od_ideal = abs(dni_index[data] - ideal)
+            klucz = (tlum_na_dobie, od_ideal)
+
+            if najlepszy_klucz is None or klucz < najlepszy_klucz:
+                najlepszy_klucz = klucz
+                najlepszy_data = data
+
+        if najlepszy_data is not None:
+            state.przydziel(imie, najlepszy_data, "DK")
 
 
 # === Faza 5: Uzupełnienie pustych dni (fallback awaryjny) ===
@@ -456,6 +494,10 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
                         continue
                 kod = "D" if state.liczba_na_dzien(data, "D") <= state.liczba_na_dzien(data, "N") else "N"
                 if not sprawdz_co_4_niedziela(state.przydzial[imie], data, kod, data.year, data.month):
+                    continue
+                if not sprawdz_przerwe_12h(state.przydzial[imie], data, kod, state.normatywy[imie].koncowka_minuty):
+                    continue
+                if not sprawdz_przerwe_12h_nastepna(state.przydzial[imie], data, kod, state.normatywy[imie].koncowka_minuty):
                     continue
                 state.przydziel(imie, data, kod)
                 assigned = True

@@ -230,12 +230,17 @@ Zawiera funkcje sprawdzające ograniczenia C1–C7 **przed każdym przydzielenie
 |---------|-------------|
 | `sprawdz_niedyspozycje(p, data)` | C1: pracownik niedyspozycyjny w danym dniu |
 | `sprawdz_weekendy(p, data, kod)` | C3: zakaz pracy w weekend przy fladze `pracuje_w_weekendy=False` |
-| `sprawdz_przerwe_12h(przydzial, data, kod)` | C4: minimalna przerwa 12h od końca poprzedniej zmiany |
+| `sprawdz_przerwe_12h(przydzial, data, kod)` | C4: minimalna przerwa 12h od końca **poprzedniej** zmiany (wstecz) |
+| `sprawdz_przerwe_12h_nastepna(przydzial, data, kod)` | C4: minimalna przerwa 12h do początku **następnej** już przydzielonej zmiany (wprzód) |
 | `sprawdz_max_36h_tydzien(przydzial, data, kod, p)` | C5: max 36h w tygodniu dla etatowców zmianowych |
 | `sprawdz_bilans_bez_nadgodzin(przepracowane, normatyw, kod)` | C6: zakaz nadgodzin dla etatowców |
 | `sprawdz_co_4_niedziela(przydzial, data, kod, rok, miesiac)` | C7: bidirectionalna kontrola serii roboczych niedziel |
 
-**Funkcja `czy_mozna_przydzielic(...)`** — centralna bramka: agreguje wszystkie powyższe funkcje i zwraca `True` tylko gdy **każde** ograniczenie jest spełnione. Wywołana przed przydzieleniem zmiany w każdej z 5 faz algorytmu.
+**Funkcja `czy_mozna_przydzielic(...)`** — centralna bramka: agreguje wszystkie powyższe funkcje i zwraca `True` tylko gdy **każde** ograniczenie jest spełnione. Wywołana przed przydzieleniem zmiany w każdej z 5 faz algorytmu. Ograniczenie C4 sprawdzane jest dwukrotnie: najpierw wstecz (`sprawdz_przerwe_12h`), a następnie wprzód (`sprawdz_przerwe_12h_nastepna`).
+
+**Szczegóły C4 — dwukierunkowa kontrola przerwy 12h:**
+
+Klasyczne sprawdzenie wstecz (czy poprzednia zmiana skończyła się ≥12h przed nową) nie wystarcza, gdy algorytm przydziela zmiany w kolejności niechronologicznej (np. Faza 3b może przydzielić zmianę N we wtorek, gdy środowe D zostało przydzielone wcześniej). Dlatego każdorazowo sprawdzane jest również, czy nowa zmiana kończy się co najmniej 12h przed początkiem następnej już przydzielonej zmiany roboczej (sprawdzane wprzód do 2 dni).
 
 **Szczegóły C7 — bidirectionalna kontrola niedziel:**
 
@@ -267,12 +272,13 @@ Renderuje wyniki w przeglądarce za pomocą Streamlit i Pandas Styler.
 
 **Kluczowe funkcje:**
 
-- `buduj_df_harmonogramu(state, dni)` — tworzy DataFrame: wiersze = pracownicy, kolumny = dni miesiąca; puste komórki jako `""` (nie `NaN`)
+- `buduj_df_do_edycji(state, dni, swieta, pokazuj_niedyspozycje=False)` — tworzy DataFrame: wiersze = pracownicy, kolumny = dni miesiąca; puste komórki jako `""` (nie `NaN`). Gdy `pokazuj_niedyspozycje=True`, komórki w dniach z `Pracownik.niedyspozycje` wypełniane są symbolem `"X"` (tylko widok — nie edytor).
 - `_buduj_styled_df(df, dni, swieta)` — Pandas Styler z dynamicznym kolorowaniem:
   - weekendy: szary `#636363`, biały tekst
   - święta: czerwony `#B31515`, biały tekst
   - zmiany: D=`#118249`, N=`#12196B`, DN=`#731A6E`, R=`#5F6639`, DK=`#9C6B10`
-- `renderuj_harmonogram(state, dni, swieta, normatyw_info)` — wyświetla podgląd tylko do odczytu (styled) + edytowalny `st.data_editor` w ekspanderze; po edycji automatycznie przelicza bilanse
+  - niedyspozycja (`X`): ciemnoczerwony `#C62828`, biały tekst
+- `renderuj_harmonogram(state, dni, swieta, normatyw_info)` — buduje dwa osobne DataFrame: `df_widok` (z `X` dla niedyspozycji, przekazywany do Pandas Styler) oraz `df` (czysty, bez `X`, przekazywany do `st.data_editor`); po edycji automatycznie przelicza bilanse
 - `oblicz_podsumowanie(state, normatywy)` — tabela z kolumnami: normatyw, przepracowane, bilans, liczba dyżurów nocnych/dziennych/weekendowych/świątecznych, suma dyżurów
 - `eksportuj_harmonogram(state, dni, key)` — eksport do CSV i Excel z pustymi komórkami (bez NaN/None)
 
@@ -357,7 +363,7 @@ Kontraktowcy muszą **osiągnąć lub przekroczyć** minimum. Dla nich nie obowi
 | C1 | Pracownik jest niedyspozycyjny w danym dniu | `sprawdz_niedyspozycje` |
 | C2 | Pracownik ma już przydzieloną zmianę roboczą w tym dniu | `czy_mozna_przydzielic` |
 | C3 | Flaga `pracuje_w_weekendy = False` i data jest sobotą lub niedzielą | `sprawdz_weekendy` |
-| C4 | Przerwa od końca poprzedniej zmiany do początku nowej jest mniejsza niż 12h | `sprawdz_przerwe_12h` |
+| C4 | Przerwa między zmianami mniejsza niż 12h – sprawdzana **dwukierunkowo**: od końca poprzedniej do początku nowej (`sprawdz_przerwe_12h`) ORAZ od końca nowej do początku następnej już przydzielonej zmiany (`sprawdz_przerwe_12h_nastepna`) | `sprawdz_przerwe_12h`, `sprawdz_przerwe_12h_nastepna` |
 | C5 | Etatowiec zmianowy: suma godzin w tygodniu po dodaniu zmiany przekracza 36h | `sprawdz_max_36h_tydzien` |
 | C6 | Etatowiec: suma przepracowanych godzin po dodaniu zmiany przekracza normatyw (nadgodziny) | `sprawdz_bilans_bez_nadgodzin` |
 | C7 | Co 4. niedziela musi być wolna — seria roboczych niedziel (wstecz + 1 + wprzód) nie może przekroczyć 3 | `sprawdz_co_4_niedziela` |
@@ -431,12 +437,16 @@ DLA KAŻDEGO kontraktowca p:
       potrzebne = max(1, (normatyw.minuty + DN_MINUTY - 1) // DN_MINUTY)
       ideal = (n + 0.5) × len(dni) / potrzebne   # środek n-tego "okna"
       od_ideal = |indeks_dnia - ideal|
-      klucz = (od_ideal, obsada_dnia, kara_skupień, -rozmiar_luki)
+      unique_people = liczba unikalnych pracowników w tej samej grupie,
+                      którzy w dniu mają jakąkolwiek zmianę roboczą
+                      (kod ∈ WORKING_SHIFTS)
+      klucz = (unique_people, od_ideal, obsada_dnia, kara_skupień, -rozmiar_luki)
     
     WYBIERZ (dzień, kod) z najniższym kluczem → state.przydziel(p, dzień, kod)
 ```
 
-Sortowanie po `od_ideal` jako kryterium głównym zapewnia równomierne rozłożenie DN w całym miesiącu (nie tylko w pierwszej połowie).
+Sortowanie po `unique_people` (tłum na dobie) jako kryterium głównym ogranicza „napakowanie” pod koniec miesiąca,
+a dopiero potem `od_ideal` wymusza równomierne rozłożenie DN w czasie (po całym miesiącu).
 
 ### Faza 3: Obsada minimalna D/N — etatowcy zmianowi
 
@@ -487,7 +497,11 @@ POWTARZAJ dopóki ∃ etatowiec zmianowy z niedoborem ≥ 720 min (12h):
         JEŚLI czy_mozna_przydzielic(p, dzień, kod, ...) → dodaj
     
     JEŚLI możliwe_dni niepuste:
-      klucz = (od_ideal, obsada, kara_skupień, -luka)
+      klucz = (obsada, kara_skupień, -luka, od_ideal)
+        obsada     – bieżąca obsada D lub N w tym dniu (KRYTERIUM GŁÓWNE – unikaj tłoku)
+        kara_skupień – 200 gdy dzień następuje bezpośrednio po zmianie
+        luka       – rozmiar luki między sąsiednimi zmianami pracownika (większa → lepiej)
+        od_ideal   – odległość od idealnej pozycji w miesiącu (tylko tiebreaker)
       WYBIERZ najlepszy dzień → przydziel
 ```
 
@@ -495,11 +509,17 @@ POWTARZAJ dopóki ∃ etatowiec zmianowy z niedoborem ≥ 720 min (12h):
 
 ```
 DLA KAŻDEGO etatowca zmianowego p:
-  JEŚLI normatyw.koncowka_minuty > 0 AND state.przepracowane[p] < normatyw.minuty:
-    DLA KAŻDEGO dnia roboczego (pn–pt, nie święto):
-      JEŚLI czy_mozna_przydzielic(p, dzień, "DK", ...):
-        state.przydziel(p, dzień, "DK")
-        BREAK
+  JEŚLI normatyw.koncowka_minuty > 0 oraz state.przepracowane[p] < normatyw.minuty:
+    ZBIERZ kandydat-dni = {dni robocze pn–pt, bez świąt, gdzie p nie ma jeszcze przydziału
+    oraz czy_mozna_przydzielic(p, dzień, "DK", ...) zwraca True}
+
+    DLA każdego kandydata d:
+      tlum_na_dobie = liczba osób z jakąkolwiek zmianą roboczą w dniu d
+      od_ideal = |indeks(d) - ideal|, gdzie ideal zależy od liczby już przydzielonych bloków 12h
+                  (D+DN i N+DN liczą się jako osobne bloki) względem normatyw.pelne_dyzury_12h
+
+    wybierz d z minimalnym kluczem (tlum_na_dobie, od_ideal)
+    state.przydziel(p, d, "DK")
 ```
 
 ### Faza 5: Fallback — uzupełnienie pustych dni
@@ -515,6 +535,8 @@ DLA KAŻDEGO dnia miesiąca:
     JEŚLI etat AND przepracowane + 720 > normatyw → POMIŃ
     JEŚLI NOT sprawdz_co_4_niedziela(...) → POMIŃ
     kod = "D" JEŚLI obs_D ≤ obs_N ELSE "N"
+    JEŚLI NOT sprawdz_przerwe_12h(...) → POMIŃ          # C4 wstecz
+    JEŚLI NOT sprawdz_przerwe_12h_nastepna(...) → POMIŃ  # C4 wprzód
     state.przydziel(p, dzień, kod)
     BREAK
   
@@ -625,18 +647,21 @@ Po kliknięciu przycisku wyświetlane są 5 zakładek (jedna per harmonogram), k
 
 | Element | Kolor tła | Kolor tekstu |
 |---------|-----------|-------------|
-| Weekend (sb, nd) | Bordeaux `#4F1C12` | Biały |
-| Święto | Jasny czerwony `#ffe0e0` | Czarny |
-| Zmiana D | Zielony `#118249` | Czarny |
+| Weekend (sb, nd) | Szary `#636363` | Biały |
+| Święto | Czerwony `#B31515` | Biały |
+| Zmiana D | Zielony `#118249` | Biały |
 | Zmiana N | Ciemny niebieski `#12196B` | Biały |
 | Zmiana DN | Fioletowy `#731A6E` | Biały |
 | Zmiana R | Oliwkowy `#5F6639` | Biały |
 | Zmiana DK | Brązowy `#9C6B10` | Biały |
+| Niedyspozycja (`X`) | Ciemnoczerwony `#C62828` | Biały |
 | Pusta komórka | Biały | — |
 
 ### 11.3. Edycja i eksport
 
-Edytor pozwala ręcznie poprawić kod zmiany w dowolnej komórce. Dozwolone kody: `D`, `N`, `DN`, `R`, `DK`, `U`, `W`, `""`. Po zapisaniu zmiany tabela podsumowująca automatycznie się przelicza. Eksport zachowuje puste komórki jako puste (nie `NaN`) i nie stosuje kolorowania — plik jest gotowy do dalszej obróbki.
+Kolorowana tabela tylko do odczytu wyświetla symbol `X` (ciemnoczerwone tło) w komórkach odpowiadających dniom niedyspozycji pracownika — o ile wczytano plik CSV niedyspozycji. Symbol `X` pojawia się wyłącznie w pustych komórkach (jeśli tego dnia przydzielono zmianę, zmiana ma pierwszeństwo). Edytor poniżej nie zawiera symbolu `X` — pola niedyspozycji są tam puste, dzięki czemu ręczna edycja pozostaje nieskomplikowana.
+
+Edytor pozwala ręcznie poprawić kod zmiany w dowolnej komórce. Dozwolone kody: `D`, `N`, `DN`, `R`, `DK`, `U`, `W`, `""`. Po zapisaniu zmiany tabela podsumowująca automatycznie się przelicza. Eksport zachowuje puste komórki jako puste (nie `NaN`), nie stosuje kolorowania i nie zawiera symbolu `X` — plik jest gotowy do dalszej obróbki.
 
 ---
 
@@ -645,7 +670,7 @@ Edytor pozwala ręcznie poprawić kod zmiany w dowolnej komórce. Dozwolone kody
 ### 12.1. Ograniczenia obecnej wersji
 
 - Algorytm nie cofa decyzji (*no backtracking*) — lokalne optimum może nie być globalnym optimum; w skrajnych przypadkach (mało personelu, wiele niedyspozycji) norma obsady może nie zostać osiągnięta.
-- Limit 36h/tydzień jest egzekwowany w fazach 1–4, ale nie w Fazie 5 (fallback awaryjny) — w sytuacjach kryzysowych możliwe minimalne przekroczenie.
+- Limit 36h/tydzień oraz normatyw nie są egzekwowane w Fazie 5 Próba 2 (fallback awaryjny) — w sytuacjach kryzysowych możliwe minimalne przekroczenie. Ograniczenie C4 (przerwa 12h) obowiązuje również w Fazie 5.
 - Chronologiczna kolejność dni w fazach 3/3b może faworyzować początki miesiąca przy bardzo napiętych harmonogramach.
 - Brak obsługi urlopów planowanych (U) — urlopy muszą być wprowadzane ręcznie przez edytor.
 - Planowanie jest miesięczne — brak ciągłości bilansów między miesiącami.

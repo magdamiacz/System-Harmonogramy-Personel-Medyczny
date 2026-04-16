@@ -93,6 +93,36 @@ def sprawdz_przerwe_12h(
     return przerwa_minuty >= MIN_REST_MINUTES
 
 
+def sprawdz_przerwe_12h_nastepna(
+    przydzial: Dict[datetime.date, str],
+    data: datetime.date,
+    nowy_kod: str,
+    koncowka_minuty: int = 0,
+) -> bool:
+    """
+    Sprawdza, czy koniec nowej zmiany jest co najmniej 12h przed początkiem
+    następnej już przydzielonej zmiany roboczej.
+    Sprawdza wprzód maksymalnie 2 dni (wystarczy dla 24h DN).
+
+    Zwraca True, jeśli ograniczenie jest spełnione.
+    """
+    start_h_nowy = SHIFT_START_HOUR.get(nowy_kod, 0)
+    dur_nowy = _get_shift_minutes(nowy_kod, koncowka_minuty)
+    koniec_nowy = datetime.datetime(data.year, data.month, data.day, start_h_nowy, 0) + datetime.timedelta(minutes=dur_nowy)
+
+    for delta in range(1, 3):
+        next_date = data + datetime.timedelta(days=delta)
+        kod_nast = przydzial.get(next_date, "")
+        if kod_nast not in WORKING_SHIFTS:
+            continue
+        start_h_nast = SHIFT_START_HOUR.get(kod_nast, 0)
+        start_nast = datetime.datetime(next_date.year, next_date.month, next_date.day, start_h_nast, 0)
+        przerwa_minuty = (start_nast - koniec_nowy).total_seconds() / 60
+        return przerwa_minuty >= MIN_REST_MINUTES
+
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Ograniczenie 2: max 36h w tygodniu (etatowcy)
 # ---------------------------------------------------------------------------
@@ -279,8 +309,10 @@ def czy_mozna_przydzielic(
     if not sprawdz_weekendy(pracownik, data, nowy_kod):
         return False
 
-    # Minimalna przerwa 12h
+    # Minimalna przerwa 12h (wstecz i wprzód)
     if not sprawdz_przerwe_12h(przydzial, data, nowy_kod, koncowka_minuty):
+        return False
+    if not sprawdz_przerwe_12h_nastepna(przydzial, data, nowy_kod, koncowka_minuty):
         return False
 
     # Max 36h/tydzień (tylko etatowcy)

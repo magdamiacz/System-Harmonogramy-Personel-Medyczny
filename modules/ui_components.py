@@ -31,7 +31,7 @@ KOLOR_KOLUMNY_WEEKEND = "#636363"   # Szary
 KOLOR_KOLUMNY_SWIETO  = "#B31515"   # Czerwony
 
 # Kolory ciemne – wymagają jasnego tekstu dla czytelności
-KOLORY_CIEMNE = {"#636363", "#b31515", "#12196b", "#731a6e", "#9c6b10", "#5f6639"}
+KOLORY_CIEMNE = {"#636363", "#b31515", "#12196b", "#731a6e", "#9c6b10", "#5f6639", "#c62828"}
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,7 @@ KOLOR_ZMIANY: Dict[str, str] = {
     "U":  "#ffcdd2",   # Czerwony – urlop
     "UM": "#f8bbd0",   # Różowy – urlop macierzyński
     "W":  "#eeeeee",   # Szary – wolne
+    "X":  "#C62828",   # Czerwony ciemny – niedyspozycja
     "":   "",          # Puste = kolor kolumny (weekend/święto) lub biały
 }
 
@@ -91,11 +92,14 @@ def buduj_df_do_edycji(
     state: HarmonogramState,
     dni: List[datetime.date],
     swieta: Set[datetime.date],
+    pokazuj_niedyspozycje: bool = False,
 ) -> pd.DataFrame:
     """
     Tworzy DataFrame z harmonogramem z prostymi nagłówkami numerycznymi
     dla komponentu st.data_editor (edycja użytkownika).
     Puste komórki = "" (nigdy NaN/None).
+    Gdy pokazuj_niedyspozycje=True, puste komórki w dniach niedyspozycji
+    wypełniane są jako "X" (tylko do widoku – nie edytor).
     """
     NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
     naglowki_display = [f"{NAZWY_DNI[d.weekday()]} {d.day}" for d in dni]
@@ -106,7 +110,12 @@ def buduj_df_do_edycji(
         row = {}
         for d in dni:
             val = state.get_przydzial(imie, d)
-            row[f"{NAZWY_DNI[d.weekday()]} {d.day}"] = val if val else ""
+            if val:
+                row[f"{NAZWY_DNI[d.weekday()]} {d.day}"] = val
+            elif pokazuj_niedyspozycje and d in p.niedyspozycje:
+                row[f"{NAZWY_DNI[d.weekday()]} {d.day}"] = "X"
+            else:
+                row[f"{NAZWY_DNI[d.weekday()]} {d.day}"] = ""
         dane[imie] = row
 
     df = pd.DataFrame.from_dict(dane, orient="index")
@@ -271,7 +280,8 @@ def renderuj_harmonogram(
     with col_leg1:
         st.caption(
             "🟤 weekend (So/Nd)  |  🔴 święto  "
-            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=fioletowy, R=zielony, DK=brązowy)"
+            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=fioletowy, R=oliwkowy, DK=brązowy)  |  "
+            "🔴 **X** = niedyspozycja"
         )
     with col_leg2:
         with st.expander("Legenda kodów zmian"):
@@ -289,9 +299,10 @@ def renderuj_harmonogram(
             """)
 
     df = buduj_df_do_edycji(state, dni, swieta)
+    df_widok = buduj_df_do_edycji(state, dni, swieta, pokazuj_niedyspozycje=True)
 
     # ── Kolorowana tabela (tylko do odczytu) ──────────────────────────────────
-    styled = _buduj_styled_df(df, dni, swieta)
+    styled = _buduj_styled_df(df_widok, dni, swieta)
     st.dataframe(
         styled,
         use_container_width=True,
@@ -369,7 +380,6 @@ def renderuj_podsumowanie(
         styled,
         use_container_width=True,
         hide_index=True,
-        key=f"summary_{key_prefix}",
     )
 
 
