@@ -1,4 +1,3 @@
-# modules/scheduler.py
 # Algorytm zachłanny generowania harmonogramu pracy.
 #
 # Fazy działania:
@@ -39,7 +38,7 @@ _KODY_OBSADY: Dict[str, set] = {
     "R": {"R"},
 }
 
-# === Stan harmonogramu ===
+# Stan harmonogramu
 
 class HarmonogramState:
     """Bieżący stan generowania harmonogramu dla jednej grupy pracowników."""
@@ -93,7 +92,7 @@ class HarmonogramState:
         return sum(1 for p in self.pracownicy if self.get_przydzial(p.imie_nazwisko, data) in kody)
 
 
-# === Pomocniki rozkładu zmian ===
+# Pomocniki rozkładu zmian
 
 def _rozmiar_luki_pracownika(imie: str, data: datetime.date, state: HarmonogramState) -> int:
     """Rozmiar luki (dni) między zmianami pracownika, w którą wpada data."""
@@ -118,7 +117,7 @@ def _dni_od_ostatniej_zmiany(imie: str, data: datetime.date, state: HarmonogramS
     return (data - (max(przed) if przed else state.dni[0])).days
 
 
-# === Funkcja scoring ===
+# Funkcja scoring
 
 def score_pracownik(p: Pracownik, data: datetime.date, kod: str, state: HarmonogramState) -> float:
     """Wynik zachłanny – im wyższy, tym pracownik bardziej pożądany do przydziału."""
@@ -170,7 +169,7 @@ def score_pracownik(p: Pracownik, data: datetime.date, kod: str, state: Harmonog
     return score
 
 
-# === Faza 1: Zmiany R dla pracowników tylko_7h ===
+# Faza 1: Zmiany R dla pracowników tylko_7h
 
 def faza_1_r_shifts(state: HarmonogramState) -> None:
     """Przydziela R w każdy dzień roboczy pracownikom z flagą tylko_7h."""
@@ -198,7 +197,7 @@ def faza_1_r_shifts(state: HarmonogramState) -> None:
                 state.przydziel(imie, data, "R")
 
 
-# === Faza 2: Kontrakty (DN preferowane, potem D/N) ===
+# Faza 2: Kontrakty (DN preferowane, potem D/N)
 
 def faza_2_kontrakty(state: HarmonogramState, norm: object) -> None:
     """Przydziela zmiany kontraktowcom, rozkładając je równomiernie w miesiącu."""
@@ -266,7 +265,7 @@ def faza_2_kontrakty(state: HarmonogramState, norm: object) -> None:
             state.przydziel(imie, data, kod)
 
 
-# === Faza 3: Obsada D/N – wypełnienie minimalnej normy ===
+# Faza 3: Obsada D/N – wypełnienie minimalnej normy
 
 def _get_max_shifts(norm, typ: str) -> int:
     """Maksymalna obsada danego typu na dobę (limit przeciw tłumom)."""
@@ -341,7 +340,7 @@ def faza_3_obsada(state: HarmonogramState, norm: object) -> None:
                         break
 
 
-# === Faza 3b: Uzupełnianie niedoborów godzin etatowców ===
+# Faza 3b: Uzupełnianie niedoborów godzin etatowców
 
 def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
     """
@@ -397,7 +396,7 @@ def faza_3b_uzupelnianie(state: HarmonogramState, norm: object) -> None:
                 zmiana_nastapila = True
 
 
-# === Faza 4: Końcówki DK ===
+# Faza 4: Końcówki DK
 
 def faza_4_koncowki(state: HarmonogramState) -> None:
     """Dodaje końcówkę DK etatowcom zmianowym z niedoborem < 12h."""
@@ -457,7 +456,7 @@ def faza_4_koncowki(state: HarmonogramState) -> None:
             state.przydziel(imie, najlepszy_data, "DK")
 
 
-# === Faza 5: Uzupełnienie pustych dni (fallback awaryjny) ===
+# Faza 5: Uzupełnienie pustych dni (fallback awaryjny)
 
 def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
     """
@@ -506,7 +505,7 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
                 break
 
 
-# === Generowanie harmonogramu dla jednej grupy ===
+# Generowanie harmonogramu dla jednej grupy
 
 def generuj_harmonogram_grupy(
     pracownicy: List[Pracownik],
@@ -532,7 +531,7 @@ def generuj_harmonogram_grupy(
     return state
 
 
-# === Generowanie wszystkich harmonogramów ===
+# Generowanie wszystkich harmonogramów
 
 def generuj_wszystkie_harmonogramy(
     grupy: Dict[str, List[Pracownik]],
@@ -550,7 +549,7 @@ def generuj_wszystkie_harmonogramy(
     }
 
 
-# === Podsumowanie ===
+# Podsumowanie
 
 def oblicz_podsumowanie(state: HarmonogramState, swieta: Set[datetime.date]) -> List[dict]:
     """Oblicza podsumowanie dla każdego pracownika (godziny, bilans, liczniki dyżurów)."""

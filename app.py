@@ -1,4 +1,3 @@
-# app.py
 # Główna aplikacja Streamlit – Zautomatyzowany System Generowania Harmonogramów
 # Uruchamianie: streamlit run app.py
 
@@ -8,7 +7,6 @@ import os
 
 import streamlit as st
 
-# Dodaj katalog projektu do ścieżki (potrzebne gdy uruchamiamy z innego folderu)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import SCHEDULE_KEYS, SCHEDULE_LABELS, WORK_MINUTES_PER_DAY_STANDARD
@@ -19,9 +17,7 @@ from modules.scheduler import generuj_wszystkie_harmonogramy
 from modules.ui_components import eksportuj_harmonogram, renderuj_harmonogram, renderuj_podsumowanie
 
 
-# ---------------------------------------------------------------------------
 # Konfiguracja strony
-# ---------------------------------------------------------------------------
 
 st.set_page_config(
     page_title="Harmonogram pracy – personel medyczny",
@@ -33,9 +29,7 @@ st.set_page_config(
 st.title("Zautomatyzowany System Generowania Harmonogramów Pracy")
 st.caption("Personel medyczny | Algorytm zachłanny")
 
-# ---------------------------------------------------------------------------
 # Sidebar: parametry i import danych
-# ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.header("Parametry")
@@ -90,9 +84,7 @@ with st.sidebar:
     st.divider()
 
 
-# ---------------------------------------------------------------------------
 # Główna logika: wczytaj dane i wygeneruj harmonogram
-# ---------------------------------------------------------------------------
 
 # Przechowuj wygenerowane harmonogramy w session_state
 if "harmonogramy" not in st.session_state:
@@ -171,9 +163,7 @@ if generuj_btn:
             )
 
 
-# ---------------------------------------------------------------------------
 # Wyświetlanie harmonogramów w zakładkach
-# ---------------------------------------------------------------------------
 
 harmonogramy = st.session_state.get("harmonogramy", {})
 info = st.session_state.get("info_miesiaca")

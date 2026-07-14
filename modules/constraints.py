@@ -1,6 +1,5 @@
-# modules/constraints.py
 # Walidacja ograniczeń harmonogramu dla poszczególnych pracowników.
-# Każda funkcja zwraca True, jeśli ograniczenie JEST SPEŁNIONE (można przydzielić zmianę).
+# Każda funkcja zwraca True, jeśli ograniczenie jest spełnione (można przydzielić zmianę).
 
 import datetime
 from typing import Dict, Optional
@@ -17,10 +16,7 @@ from config import (
 )
 from modules.data_loader import Pracownik
 
-
-# ---------------------------------------------------------------------------
 # Pomocnicze: czas końca ostatniej zmiany
-# ---------------------------------------------------------------------------
 
 def _get_shift_minutes(kod: str, koncowka_minuty: int = 0) -> int:
     """Zwraca długość zmiany w minutach."""
@@ -65,9 +61,7 @@ def czas_konca_poprzedniej(
     return None
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 1: minimum 12h przerwy między zmianami
-# ---------------------------------------------------------------------------
 
 def sprawdz_przerwe_12h(
     przydzial: Dict[datetime.date, str],
@@ -123,9 +117,7 @@ def sprawdz_przerwe_12h_nastepna(
     return True
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 2: max 36h w tygodniu (etatowcy)
-# ---------------------------------------------------------------------------
 
 def _poczatek_tygodnia(data: datetime.date) -> datetime.date:
     """Zwraca poniedziałek tygodnia, do którego należy data."""
@@ -177,9 +169,7 @@ def sprawdz_max_36h_tydzien(
     return (juz_przepracowane + nowe_minuty) <= MAX_WEEKLY_MINUTES_ETAT
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 3: co 4. niedziela musi być wolna
-# ---------------------------------------------------------------------------
 
 def sprawdz_co_4_niedziela(
     przydzial: Dict[datetime.date, str],
@@ -224,9 +214,7 @@ def sprawdz_co_4_niedziela(
     return seria <= 3
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 4: niedyspozycje pracownika
-# ---------------------------------------------------------------------------
 
 def sprawdz_niedyspozycje(
     pracownik: Pracownik,
@@ -238,9 +226,7 @@ def sprawdz_niedyspozycje(
     return data not in pracownik.niedyspozycje
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 5: bilans godzin (etatowcy nie mogą mieć nadgodzin)
-# ---------------------------------------------------------------------------
 
 def sprawdz_bilans_bez_nadgodzin(
     przepracowane_minuty: int,
@@ -258,9 +244,7 @@ def sprawdz_bilans_bez_nadgodzin(
     return (przepracowane_minuty + nowe_minuty) <= normatyw_minuty
 
 
-# ---------------------------------------------------------------------------
 # Ograniczenie 6: pracownik nie pracuje w weekendy (flaga)
-# ---------------------------------------------------------------------------
 
 def sprawdz_weekendy(
     pracownik: Pracownik,
@@ -278,9 +262,7 @@ def sprawdz_weekendy(
     return True
 
 
-# ---------------------------------------------------------------------------
 # Zbiorcza walidacja wszystkich ograniczeń
-# ---------------------------------------------------------------------------
 
 def czy_mozna_przydzielic(
     pracownik: Pracownik,
@@ -315,10 +297,8 @@ def czy_mozna_przydzielic(
     if not sprawdz_przerwe_12h_nastepna(przydzial, data, nowy_kod, koncowka_minuty):
         return False
 
-    # Max 36h/tydzień (tylko etatowcy)
-    if pracownik.is_etat:
-        if not sprawdz_max_36h_tydzien(przydzial, data, nowy_kod, pracownik, koncowka_minuty):
-            return False
+    # Limit 36h/tydzień jest ograniczeniem miękkim (uśrednienie 40h w okresie rozliczeniowym) – realizowanym przez scoring S6 w scheduler.py.
+    # Twarde pozostaje wyłącznie nieprzekroczenie normatywu miesięcznego.
 
     # Bilans bez nadgodzin (tylko etatowcy)
     if pracownik.is_etat:

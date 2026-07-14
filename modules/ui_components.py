@@ -1,4 +1,3 @@
-# modules/ui_components.py
 # Komponenty interfejsu użytkownika Streamlit:
 #   - renderowanie tabeli harmonogramu (edytowalna)
 #   - tabela podsumowań
@@ -23,20 +22,15 @@ from modules.normative import _minuty_na_str
 from modules.scheduler import HarmonogramState, oblicz_podsumowanie
 
 
-# ---------------------------------------------------------------------------
 # Kolory kolumn: weekend = szary (#636363), święto = czerwony (#B31515)
-# ---------------------------------------------------------------------------
 
 KOLOR_KOLUMNY_WEEKEND = "#636363"   # Szary
 KOLOR_KOLUMNY_SWIETO  = "#B31515"   # Czerwony
 
-# Kolory ciemne – wymagają jasnego tekstu dla czytelności
 KOLORY_CIEMNE = {"#636363", "#b31515", "#12196b", "#731a6e", "#9c6b10", "#5f6639", "#c62828"}
 
 
-# ---------------------------------------------------------------------------
 # Kolory komórek harmonogramu (typ zmiany)
-# ---------------------------------------------------------------------------
 
 KOLOR_ZMIANY: Dict[str, str] = {
     "D":  "#118249",   # Zielony – dyżur dzienny
@@ -52,9 +46,7 @@ KOLOR_ZMIANY: Dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Budowanie DataFrame harmonogramu
-# ---------------------------------------------------------------------------
 
 def buduj_df_harmonogramu(
     state: HarmonogramState,
@@ -130,9 +122,7 @@ def buduj_df_do_edycji(
     return df
 
 
-# ---------------------------------------------------------------------------
 # Nagłówek normatywu i końcówki
-# ---------------------------------------------------------------------------
 
 def _buduj_styled_df(
     df: pd.DataFrame,
@@ -206,9 +196,7 @@ def buduj_tekst_normatywu(
     return " | ".join(linie)
 
 
-# ---------------------------------------------------------------------------
 # Rekalkulacja po edycji
-# ---------------------------------------------------------------------------
 
 def rekalkuluj_state_po_edycji(
     state: HarmonogramState,
@@ -251,9 +239,7 @@ def rekalkuluj_state_po_edycji(
     return state
 
 
-# ---------------------------------------------------------------------------
 # Renderowanie tabeli harmonogramu
-# ---------------------------------------------------------------------------
 
 def renderuj_harmonogram(
     state: HarmonogramState,
@@ -279,7 +265,7 @@ def renderuj_harmonogram(
     col_leg1, col_leg2 = st.columns(2)
     with col_leg1:
         st.caption(
-            "🟤 weekend (So/Nd)  |  🔴 święto  "
+            "weekend (So/Nd)  |  🔴 święto  "
             "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=fioletowy, R=oliwkowy, DK=brązowy)  |  "
             "🔴 **X** = niedyspozycja"
         )
@@ -301,7 +287,7 @@ def renderuj_harmonogram(
     df = buduj_df_do_edycji(state, dni, swieta)
     df_widok = buduj_df_do_edycji(state, dni, swieta, pokazuj_niedyspozycje=True)
 
-    # ── Kolorowana tabela (tylko do odczytu) ──────────────────────────────────
+    # ─Kolorowana tabela (tylko do odczytu)
     styled = _buduj_styled_df(df_widok, dni, swieta)
     st.dataframe(
         styled,
@@ -309,7 +295,7 @@ def renderuj_harmonogram(
         hide_index=True,
     )
 
-    # ── Edytor (bez kolorów, ale z możliwością edycji) ────────────────────────
+    # Edytor (bez kolorów, ale z możliwością edycji)
     NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
     col_config = {
         "Imię i nazwisko": st.column_config.TextColumn(
@@ -345,9 +331,7 @@ def renderuj_harmonogram(
     return None
 
 
-# ---------------------------------------------------------------------------
 # Tabela podsumowania
-# ---------------------------------------------------------------------------
 
 def renderuj_podsumowanie(
     state: HarmonogramState,
@@ -372,7 +356,7 @@ def renderuj_podsumowanie(
                 return "background-color: #fff3cd; color: #856404;"
         return ""
 
-    styled = df.drop(columns=["Bilans_min"]).style.applymap(
+    styled = df.drop(columns=["Bilans_min"]).style.map(
         koloruj_bilans, subset=["Bilans"]
     )
 
@@ -383,9 +367,7 @@ def renderuj_podsumowanie(
     )
 
 
-# ---------------------------------------------------------------------------
 # Eksport do CSV/Excel
-# ---------------------------------------------------------------------------
 
 def eksportuj_harmonogram(
     state: HarmonogramState,

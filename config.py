@@ -1,12 +1,9 @@
-# config.py
 # Centralna konfiguracja: typy zmian, normy oddziałów, parametry umów
 
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-# ---------------------------------------------------------------------------
 # Typy zmian (kody używane w harmonogramie)
-# ---------------------------------------------------------------------------
 
 # Godziny trwania każdego kodu zmiany (w minutach)
 SHIFT_DURATIONS: Dict[str, int] = {
@@ -53,9 +50,7 @@ WORKING_SHIFTS = {"D", "N", "DN", "R", "DK"}
 # Skróty zmian nocnych (do liczenia dyżurów nocnych w podsumowaniu)
 NIGHT_SHIFTS = {"N", "DN"}
 
-# ---------------------------------------------------------------------------
 # Normy umów o pracę
-# ---------------------------------------------------------------------------
 
 # Minuty na dobę roboczą dla pracownika etatowego
 WORK_MINUTES_PER_DAY_STANDARD = 7 * 60 + 35   # 455 minut (7h35min)
@@ -74,9 +69,7 @@ MIN_REST_MINUTES = 12 * 60            # 720 minut
 # Długość pełnego dyżuru w minutach
 FULL_SHIFT_MINUTES = 12 * 60          # 720 minut
 
-# ---------------------------------------------------------------------------
 # Normy obsady na dobę dla każdego harmonogramu
-# ---------------------------------------------------------------------------
 # Każdy harmonogram definiuje wymaganą obsadę: ile D, N, R na każdy dzień.
 # Opcja "flexible" pozwala na wariant (np. 1 lub 2 D w gastro-opiekunki).
 
@@ -144,9 +137,7 @@ STAFFING_NORMS: Dict[str, DailyStaffingNorm] = {
     ),
 }
 
-# ---------------------------------------------------------------------------
 # Mapowanie oddział + rola -> klucz harmonogramu
-# ---------------------------------------------------------------------------
 
 SCHEDULE_KEYS: List[str] = [
     "gastro_piel",

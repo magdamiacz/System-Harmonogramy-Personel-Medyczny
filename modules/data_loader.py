@@ -1,4 +1,3 @@
-# modules/data_loader.py
 # Wczytywanie danych personelu oraz niedyspozycji z plików CSV.
 # Walidacja struktury pliku i typów pól.
 
@@ -12,9 +11,7 @@ import pandas as pd
 from config import get_schedule_key
 
 
-# ---------------------------------------------------------------------------
 # Model danych pracownika
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Pracownik:
@@ -56,9 +53,7 @@ class Pracownik:
         return self.typ_umowy == "maly_kontrakt"
 
 
-# ---------------------------------------------------------------------------
 # Wczytywanie pliku personelu
-# ---------------------------------------------------------------------------
 
 REQUIRED_COLUMNS_PERSONEL = {
     "imie_nazwisko", "oddzial", "rola", "typ_umowy",
@@ -147,9 +142,7 @@ def wczytaj_personel(source) -> Tuple[List[Pracownik], List[str]]:
     return pracownicy, bledy
 
 
-# ---------------------------------------------------------------------------
 # Wczytywanie niedyspozycji
-# ---------------------------------------------------------------------------
 
 REQUIRED_COLUMNS_NIEDYSP = {"imie_nazwisko", "data"}
 
@@ -213,9 +206,7 @@ def wczytaj_niedyspozycje(
     return niedyspozycje, bledy
 
 
-# ---------------------------------------------------------------------------
 # Grupowanie pracowników wg harmonogramu
-# ---------------------------------------------------------------------------
 
 def grupuj_wg_harmonogramu(
     pracownicy: List[Pracownik],

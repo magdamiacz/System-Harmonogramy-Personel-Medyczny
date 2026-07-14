@@ -1,4 +1,3 @@
-# modules/holidays.py
 # Obliczanie polskich świąt ustawowych dla dowolnego roku.
 # Świąta stałe (co roku ta sama data) + ruchome (Wielkanoc i pochodne).
 

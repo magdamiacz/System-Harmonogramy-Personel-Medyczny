@@ -1,4 +1,3 @@
-# modules/normative.py
 # Obliczanie normatywu miesięcznego dla każdego pracownika
 # oraz rozkładu tego normatywu na zmiany 12h i końcówkę (DK).
 
@@ -16,9 +15,7 @@ from config import (
 from modules.data_loader import Pracownik
 
 
-# ---------------------------------------------------------------------------
 # Struktura wynikowa normatywu
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Normatyw:
@@ -56,9 +53,7 @@ class Normatyw:
             return f"minimum 120h (kontrakt mały)"
 
 
-# ---------------------------------------------------------------------------
 # Pomocnicze funkcje formatujące
-# ---------------------------------------------------------------------------
 
 def _minuty_na_str(minuty: int) -> str:
     """Formatuje minuty na 'Xh Ymin', np. 151h40min."""
@@ -74,9 +69,7 @@ def minuty_na_godziny_float(minuty: int) -> float:
     return round(minuty / 60, 2)
 
 
-# ---------------------------------------------------------------------------
 # Główna funkcja obliczania normatywu
-# ---------------------------------------------------------------------------
 
 def oblicz_normatyw(pracownik: Pracownik, liczba_dni_roboczych: int) -> Normatyw:
     """
@@ -156,9 +149,7 @@ def oblicz_normatywy(
     }
 
 
-# ---------------------------------------------------------------------------
 # Obliczanie przepracowanych godzin z przydzielonych zmian
-# ---------------------------------------------------------------------------
 
 def oblicz_przepracowane_minuty(
     przydzial: dict,
