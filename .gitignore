@@ -1,3 +1,8 @@
 .venv/
 __pycache__/
 *.pyc
+.package_staging/
+Harmonogramy-Mac.zip
+.streamlit/secrets.toml
+.env
+.DS_Store

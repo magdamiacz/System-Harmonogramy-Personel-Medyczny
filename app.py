@@ -26,6 +26,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+# Login screen
+def show_login():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🏥 Harmonogram pracy")
+        st.markdown("Zautomatyzowany System Generowania Harmonogramów")
+        st.divider()
+
+        username = st.text_input("Login", placeholder="Wpisz login")
+        password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
+
+        if st.button("Zaloguj się", use_container_width=True, type="primary"):
+            correct_username = st.secrets.get("USERNAME", "pielegniarki")
+            correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
+
+            if username == correct_username and password == correct_password:
+                st.session_state["logged_in"] = True
+                st.success("Zalogowano pomyślnie!")
+                st.rerun()
+            else:
+                st.error("❌ Niepoprawny login lub hasło")
+
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+
+if not st.session_state["logged_in"]:
+    show_login()
+    st.stop()
+
+
+# Wylogowanie
+with st.sidebar:
+    if st.button("🚪 Wyloguj się", use_container_width=True):
+        st.session_state["logged_in"] = False
+        st.rerun()
+
+
 st.title("Zautomatyzowany System Generowania Harmonogramów Pracy")
 st.caption("Personel medyczny | Algorytm zachłanny")
 
