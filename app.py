@@ -14,6 +14,7 @@ from modules.normative import _minuty_na_str
 from modules.data_loader import grupuj_wg_harmonogramu, wczytaj_niedyspozycje, wczytaj_personel
 from modules.holidays import get_month_info
 from modules.scheduler import generuj_wszystkie_harmonogramy
+from modules.theme import inject_global_css
 from modules.ui_components import eksportuj_harmonogram, renderuj_harmonogram, renderuj_podsumowanie
 
 
@@ -26,28 +27,36 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+inject_global_css()
+
+MIESIACE_PL = [
+    "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
+    "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień",
+]
+
 
 # Login screen
 def show_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.title("🏥 Harmonogram pracy")
-        st.markdown("Zautomatyzowany System Generowania Harmonogramów")
-        st.divider()
+        with st.container(border=True):
+            st.title("🏥 Harmonogram pracy")
+            st.markdown("Zautomatyzowany System Generowania Harmonogramów")
+            st.divider()
 
-        username = st.text_input("Login", placeholder="Wpisz login")
-        password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
+            username = st.text_input("Login", placeholder="Wpisz login")
+            password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
 
-        if st.button("Zaloguj się", use_container_width=True, type="primary"):
-            correct_username = st.secrets.get("USERNAME", "pielegniarki")
-            correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
+            if st.button("Zaloguj się", use_container_width=True, type="primary"):
+                correct_username = st.secrets.get("USERNAME", "pielegniarki")
+                correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
 
-            if username == correct_username and password == correct_password:
-                st.session_state["logged_in"] = True
-                st.success("Zalogowano pomyślnie!")
-                st.rerun()
-            else:
-                st.error("❌ Niepoprawny login lub hasło")
+                if username == correct_username and password == correct_password:
+                    st.session_state["logged_in"] = True
+                    st.success("Zalogowano pomyślnie!")
+                    st.rerun()
+                else:
+                    st.error("❌ Niepoprawny login lub hasło")
 
 
 if "logged_in" not in st.session_state:
@@ -72,44 +81,45 @@ st.caption("Personel medyczny | Algorytm zachłanny")
 # Sidebar: parametry i import danych
 
 with st.sidebar:
-    st.header("Parametry")
+    with st.container(border=True):
+        st.header("📅 Parametry")
 
-    # Wybór miesiąca i roku
-    teraz = datetime.date.today()
-    rok = st.number_input(
-        "Rok",
-        min_value=2024,
-        max_value=2030,
-        value=teraz.year,
-        step=1,
-        key="rok",
-    )
-    miesiac = st.selectbox(
-        "Miesiąc",
-        options=list(range(1, 13)),
-        format_func=lambda m: datetime.date(int(rok), m, 1).strftime("%B").capitalize(),
-        index=teraz.month - 1,
-        key="miesiac",
-    )
+        # Wybór miesiąca i roku
+        teraz = datetime.date.today()
+        rok = st.number_input(
+            "Rok",
+            min_value=2024,
+            max_value=2030,
+            value=teraz.year,
+            step=1,
+            key="rok",
+        )
+        miesiac = st.selectbox(
+            "Miesiąc",
+            options=list(range(1, 13)),
+            format_func=lambda m: MIESIACE_PL[m - 1],
+            index=teraz.month - 1,
+            key="miesiac",
+        )
 
-    st.divider()
-    st.header("Import danych")
+    with st.container(border=True):
+        st.header("📁 Import danych")
 
-    # Plik personelu
-    personel_file = st.file_uploader(
-        "Plik personelu (CSV)",
-        type=["csv"],
-        key="personel_upload",
-        help="Format: imie_nazwisko, oddzial, rola, typ_umowy, orzeczenie, tylko_7h, pracuje_w_weekendy",
-    )
+        # Plik personelu
+        personel_file = st.file_uploader(
+            "Plik personelu (CSV)",
+            type=["csv"],
+            key="personel_upload",
+            help="Format: imie_nazwisko, oddzial, rola, typ_umowy, orzeczenie, tylko_7h, pracuje_w_weekendy",
+        )
 
-    # Plik niedyspozycji (opcjonalny)
-    niedysp_file = st.file_uploader(
-        "Plik niedyspozycji (CSV) – opcjonalny",
-        type=["csv"],
-        key="niedysp_upload",
-        help="Format: imie_nazwisko, data (YYYY-MM-DD)",
-    )
+        # Plik niedyspozycji (opcjonalny)
+        niedysp_file = st.file_uploader(
+            "Plik niedyspozycji (CSV) – opcjonalny",
+            type=["csv"],
+            key="niedysp_upload",
+            help="Format: imie_nazwisko, data (YYYY-MM-DD)",
+        )
 
     st.divider()
 
@@ -120,8 +130,6 @@ with st.sidebar:
         use_container_width=True,
         key="generuj_btn",
     )
-
-    st.divider()
 
 
 # Główna logika: wczytaj dane i wygeneruj harmonogram
@@ -210,6 +218,7 @@ info = st.session_state.get("info_miesiaca")
 
 if not harmonogramy:
     # Ekran powitalny przed wygenerowaniem
+    st.markdown("### 👋 Zacznij tutaj")
     st.info(
         "Wgraj plik personelu w panelu bocznym i kliknij **Generuj harmonogram**, "
         "aby zobaczyć rozkład zmian."
@@ -235,13 +244,14 @@ if not harmonogramy:
         )
 else:
     # Metadane miesiąca (normatyw = dni_robocze × 7h35min)
-    nazwa_miesiaca = datetime.date(int(rok), int(miesiac), 1).strftime("%B %Y")
+    nazwa_miesiaca = f"{MIESIACE_PL[int(miesiac) - 1]} {rok}"
     normatyw_str = _minuty_na_str(info["liczba_dni_roboczych"] * WORK_MINUTES_PER_DAY_STANDARD)
-    st.markdown(
-        f"### {nazwa_miesiaca.capitalize()}  "
-        f"| Dni robocze: **{info['liczba_dni_roboczych']}**  "
-        f"| Normatyw etat: **{normatyw_str}**"
-    )
+
+    with st.container(border=True):
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Miesiąc", nazwa_miesiaca)
+        col_m2.metric("Dni robocze", info["liczba_dni_roboczych"])
+        col_m3.metric("Normatyw etat", normatyw_str)
 
     # Listowanie świąt w miesiącu
     swieta_w_miesiacu = sorted([
@@ -249,7 +259,7 @@ else:
         if d.month == int(miesiac) and d.year == int(rok)
     ])
     if swieta_w_miesiacu:
-        st.caption("Święta w tym miesiącu: " + ", ".join(str(d) for d in swieta_w_miesiacu))
+        st.caption("🎉 Święta w tym miesiącu: " + ", ".join(str(d) for d in swieta_w_miesiacu))
 
     # Zakładki – jedna na harmonogram
     dostepne_klucze = [k for k in SCHEDULE_KEYS if k in harmonogramy]

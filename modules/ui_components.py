@@ -20,30 +20,13 @@ from modules.data_loader import Pracownik
 from modules.holidays import czy_swieto, czy_weekend, czy_niedziela
 from modules.normative import _minuty_na_str
 from modules.scheduler import HarmonogramState, oblicz_podsumowanie
-
-
-# Kolory kolumn: weekend = szary (#636363), święto = czerwony (#B31515)
-
-KOLOR_KOLUMNY_WEEKEND = "#636363"   # Szary
-KOLOR_KOLUMNY_SWIETO  = "#B31515"   # Czerwony
-
-KOLORY_CIEMNE = {"#636363", "#b31515", "#12196b", "#731a6e", "#9c6b10", "#5f6639", "#c62828"}
-
-
-# Kolory komórek harmonogramu (typ zmiany)
-
-KOLOR_ZMIANY: Dict[str, str] = {
-    "D":  "#118249",   # Zielony – dyżur dzienny
-    "N":  "#12196B",   # Ciemny niebieski – dyżur nocny
-    "DN": "#731A6E",   # Fioletowy – całodobowy (kontrakt)
-    "R":  "#5F6639",   # Oliwkowy – zmiana robocza 7h35
-    "DK": "#9C6B10",   # Brązowy – końcówka
-    "U":  "#ffcdd2",   # Czerwony – urlop
-    "UM": "#f8bbd0",   # Różowy – urlop macierzyński
-    "W":  "#eeeeee",   # Szary – wolne
-    "X":  "#C62828",   # Czerwony ciemny – niedyspozycja
-    "":   "",          # Puste = kolor kolumny (weekend/święto) lub biały
-}
+from modules.theme import (
+    BALANCE_COLORS,
+    COLUMN_HIGHLIGHTS,
+    SHIFT_COLORS,
+    build_legend_chips_html,
+    get_text_color,
+)
 
 
 # Budowanie DataFrame harmonogramu
@@ -147,19 +130,19 @@ def _buduj_styled_df(
             return [""] * len(col)
         d = col_to_date[col.name]
         if d in swieta:
-            col_bg = KOLOR_KOLUMNY_SWIETO
+            col_bg = COLUMN_HIGHLIGHTS["holiday"]["bg"]
         elif d.weekday() >= 5:
-            col_bg = KOLOR_KOLUMNY_WEEKEND
+            col_bg = COLUMN_HIGHLIGHTS["weekend"]["bg"]
         else:
             col_bg = ""
 
         styles = []
         for val in col:
             v = str(val).strip() if val else ""
-            shift_bg = KOLOR_ZMIANY.get(v, "") if v else ""
+            shift_bg = SHIFT_COLORS.get(v, "") if v else ""
             bg = shift_bg if shift_bg else col_bg
             if bg:
-                txt = "color: #ffffff;" if bg.lower() in KOLORY_CIEMNE else ""
+                txt = f"color: {get_text_color(bg)};"
                 styles.append(f"background-color: {bg}; {txt}")
             else:
                 styles.append("")
@@ -259,30 +242,13 @@ def renderuj_harmonogram(
 
     # Nagłówek: normatyw i końcówka
     if liczba_dni_roboczych > 0:
-        st.markdown(buduj_tekst_normatywu(state, liczba_dni_roboczych))
+        with st.container(border=True):
+            st.markdown(buduj_tekst_normatywu(state, liczba_dni_roboczych))
 
     # Legenda kolorów
-    col_leg1, col_leg2 = st.columns(2)
-    with col_leg1:
-        st.caption(
-            "weekend (So/Nd)  |  🔴 święto  "
-            "— kolor komórki = typ zmiany (D=zielony, N=niebieski, DN=fioletowy, R=oliwkowy, DK=brązowy)  |  "
-            "🔴 **X** = niedyspozycja"
-        )
-    with col_leg2:
-        with st.expander("Legenda kodów zmian"):
-            st.markdown("""
-            | Kod | Znaczenie | Godziny |
-            |-----|-----------|---------|
-            | **D** | Dyżur dzienny | 7:00–19:00 (12h) |
-            | **N** | Dyżur nocny | 19:00–7:00 (12h) |
-            | **DN** | Dyżur całodobowy | 7:00–7:00 (24h) – kontrakty |
-            | **R** | Zmiana robocza | 7:00–14:35 (7h35min) |
-            | **DK** | Końcówka | reszta do normatywu |
-            | **U** | Urlop | — |
-            | **UM** | Urlop macierzyński | — |
-            | **W** | Wolne za niedzielę/święto | — |
-            """)
+    st.caption("Kolor komórki pokazuje typ zmiany — szczegóły w legendzie poniżej.")
+    with st.expander("Legenda kodów zmian"):
+        st.markdown(build_legend_chips_html(), unsafe_allow_html=True)
 
     df = buduj_df_do_edycji(state, dni, swieta)
     df_widok = buduj_df_do_edycji(state, dni, swieta, pokazuj_niedyspozycje=True)
@@ -313,7 +279,10 @@ def renderuj_harmonogram(
         )
 
     with st.expander("✏️ Edytuj harmonogram", expanded=False):
-        st.caption("Wprowadź zmiany w tabeli poniżej – kolorowana tabela powyżej odświeży się po zatwierdzeniu.")
+        st.caption(
+            "Ta tabela nie pokazuje kolorów. Wpisz kod zmiany w wybranej komórce — "
+            "kolorowana tabela powyżej odświeży się automatycznie po zatwierdzeniu zmiany."
+        )
         edited_df = st.data_editor(
             df,
             key=f"editor_{key_prefix}",
@@ -351,9 +320,11 @@ def renderuj_podsumowanie(
     def koloruj_bilans(val):
         if isinstance(val, str):
             if "nadgodziny" in val:
-                return "background-color: #f8d7da; color: #721c24;"
+                c = BALANCE_COLORS["nadgodziny"]
+                return f"background-color: {c['bg']}; color: {c['fg']};"
             elif "niedobór" in val:
-                return "background-color: #fff3cd; color: #856404;"
+                c = BALANCE_COLORS["niedobor"]
+                return f"background-color: {c['bg']}; color: {c['fg']};"
         return ""
 
     styled = df.drop(columns=["Bilans_min"]).style.map(
@@ -377,7 +348,7 @@ def eksportuj_harmonogram(
     key_prefix: str,
 ) -> None:
     """
-    Przyciski eksportu harmonogramu i podsumowania do pliku CSV i Excel.
+    Przycisk eksportu harmonogramu i podsumowania do pliku Excel (dwa arkusze).
     """
     df_harm = buduj_df_do_edycji(state, dni, swieta)
     df_sum = pd.DataFrame(oblicz_podsumowanie(state, swieta)).drop(columns=["Bilans_min"])
@@ -385,29 +356,6 @@ def eksportuj_harmonogram(
     # Eksport z pustymi komórkami jako "" (nie NaN)
     df_harm_exp = df_harm.fillna("")
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        csv_harm = df_harm_exp.to_csv(index=False, encoding="utf-8-sig", na_rep="")
-        st.download_button(
-            label="Pobierz harmonogram (CSV)",
-            data=csv_harm,
-            file_name=f"harmonogram_{key_prefix}.csv",
-            mime="text/csv",
-            key=f"dl_harm_csv_{key_prefix}",
-        )
-
-    with col2:
-        csv_sum = df_sum.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(
-            label="Pobierz podsumowanie (CSV)",
-            data=csv_sum,
-            file_name=f"podsumowanie_{key_prefix}.csv",
-            mime="text/csv",
-            key=f"dl_sum_csv_{key_prefix}",
-        )
-
-    # Eksport Excel (oba arkusze w jednym pliku)
     try:
         import io
         import openpyxl
@@ -417,11 +365,12 @@ def eksportuj_harmonogram(
             df_sum.to_excel(writer, sheet_name="Podsumowanie", index=False)
         buf.seek(0)
         st.download_button(
-            label="Pobierz Excel (harmonogram + podsumowanie)",
+            label="📊 Pobierz Excel (harmonogram + podsumowanie)",
             data=buf,
             file_name=f"harmonogram_{key_prefix}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"dl_excel_{key_prefix}",
+            use_container_width=True,
         )
     except ImportError:
         st.warning("Brak biblioteki openpyxl – eksport Excel niedostępny.")

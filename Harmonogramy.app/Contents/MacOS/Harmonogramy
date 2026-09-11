@@ -1,0 +1,14 @@
+#!/bin/bash
+# Launcher aplikacji Harmonogramy – uruchamia start.command z folderu nadrzędnego.
+
+APP_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+START_SCRIPT="$APP_ROOT/start.command"
+
+if [ ! -f "$START_SCRIPT" ]; then
+  osascript -e "display alert \"Harmonogramy\" message \"Nie znaleziono pliku start.command.
+
+Upewnij się, że folder Harmonogramy.app leży w tym samym folderze co start.command i app.py.\" as critical"
+  exit 1
+fi
+
+exec /bin/bash "$START_SCRIPT"
