@@ -447,17 +447,20 @@ _LOGIN_CSS = Template("""
 }
 .block-container { padding-top: 9vh; }
 
-/* Karta logowania: cały kontener (st.container) stylizowany jako biała karta */
-[data-testid="stVerticalBlockBorderWrapper"]:has(.hp-login-head) {
-    background: $surface !important;
-    border-radius: 28px !important;
-    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55) !important;
-    max-width: 440px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    padding: 2.25rem 2rem 1.75rem !important;
+/* Karta logowania: stylowana przez pozycję środkowej z 3 kolumn (st.columns([1, 2, 1])),
+   NIE przez :has() + znacznik. st.columns() to jedyne miejsce w aplikacji używające kolumn
+   na tym poziomie, więc :nth-of-type(2) jednoznacznie wskazuje środkową kolumnę – rozwiązanie
+   odporne nawet w przeglądarkach bez obsługi :has() lub przy nieco innej strukturze DOM. */
+[data-testid="stAppViewContainer"] [data-testid="column"]:nth-of-type(2),
+[data-testid="stAppViewContainer"] [data-testid="column"]:has(.hp-login-head) {
     position: relative;
     z-index: 1;
+    max-width: 440px;
+    margin-inline: auto;
+    padding: 2.25rem 2rem 1.75rem;
+    background: $surface;
+    border-radius: 28px;
+    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55);
 }
 .hp-login-head {
     display: flex;

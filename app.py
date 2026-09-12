@@ -50,26 +50,21 @@ def show_login():
     inject_login_css()
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        with st.container(border=True):
-            st.markdown(
-                '<div style="text-align:center"><h2>🏥 Harmonogram pracy</h2>'
-                '<p style="color:#556477;font-size:0.9rem">Zautomatyzowany System Generowania Harmonogramów</p></div>',
-                unsafe_allow_html=True
-            )
+        st.markdown(login_head_html(), unsafe_allow_html=True)
 
-            username = st.text_input("Login", placeholder="Wpisz login")
-            password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
+        username = st.text_input("Login", placeholder="Wpisz login")
+        password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
 
-            if st.button("🔓 Zaloguj się", use_container_width=True, type="primary"):
-                correct_username = st.secrets.get("USERNAME", "pielegniarki")
-                correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
+        if st.button("Zaloguj się", use_container_width=True, type="primary"):
+            correct_username = st.secrets.get("USERNAME", "pielegniarki")
+            correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
 
-                if username == correct_username and password == correct_password:
-                    st.session_state["logged_in"] = True
-                    st.success("Zalogowano pomyślnie!")
-                    st.rerun()
-                else:
-                    st.error("Niepoprawny login lub hasło")
+            if username == correct_username and password == correct_password:
+                st.session_state["logged_in"] = True
+                st.success("Zalogowano pomyślnie!")
+                st.rerun()
+            else:
+                st.error("Niepoprawny login lub hasło")
 
 
 if "logged_in" not in st.session_state:
@@ -138,14 +133,14 @@ with st.sidebar:
 
     # Przycisk generowania
     generuj_btn = st.button(
-        "✨ Generuj harmonogram",
+        "Generuj harmonogram",
         type="primary",
         use_container_width=True,
         key="generuj_btn",
     )
 
     # Wylogowanie
-    if st.button("🚪 Wyloguj się", use_container_width=True):
+    if st.button("Wyloguj się", use_container_width=True):
         st.session_state["logged_in"] = False
         st.rerun()
 
