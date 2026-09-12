@@ -171,8 +171,14 @@ hr { border-color: $border; }
 [data-testid="stToolbarActions"],
 [data-testid="stDecoration"] { display: none !important; }
 
+/* Każda reguła podaje nazwy testid ze Streamlita 1.32 ORAZ z wersji nowszych, które je
+   przemianowały (element-container -> stElementContainer, column -> stColumn,
+   baseButton-* -> stBaseButton-*). Streamlit Cloud potrafi uruchomić inną wersję niż
+   przypięta lokalnie, więc wygląd nie może zależeć od jednego wariantu nazw. */
+
 /* Elementy zawierające wyłącznie CSS nie zajmują miejsca */
-[data-testid="element-container"]:has([data-testid="stMarkdownContainer"] style) { display: none; }
+[data-testid="element-container"]:has([data-testid="stMarkdownContainer"] style),
+[data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] style) { display: none; }
 
 /* Sidebar */
 [data-testid="stSidebar"] { border-right: 1px solid $border; }
@@ -209,20 +215,25 @@ hr { border-color: $border; }
     gap: 0.5rem;
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-[data-testid="baseButton-primary"] {
+[data-testid="baseButton-primary"],
+[data-testid="stBaseButton-primary"] {
     background: $primary;
     border-color: $primary;
     color: #FFFFFF;
     box-shadow: 0 10px 22px -12px rgba(15, 118, 110, 0.8);
 }
 [data-testid="baseButton-primary"]:hover,
-[data-testid="baseButton-primary"]:focus:not(:active) {
+[data-testid="baseButton-primary"]:focus:not(:active),
+[data-testid="stBaseButton-primary"]:hover,
+[data-testid="stBaseButton-primary"]:focus:not(:active) {
     background: $primary_dark;
     border-color: $primary_dark;
     color: #FFFFFF;
 }
-[data-testid="baseButton-secondary"] { background: $surface; border-color: $border; color: $text; }
-[data-testid="baseButton-secondary"]:hover { background: $teal50; border-color: $teal500; color: $primary; }
+[data-testid="baseButton-secondary"],
+[data-testid="stBaseButton-secondary"] { background: $surface; border-color: $border; color: $text; }
+[data-testid="baseButton-secondary"]:hover,
+[data-testid="stBaseButton-secondary"]:hover { background: $teal50; border-color: $teal500; color: $primary; }
 [data-testid="stDownloadButton"] button { background: $teal50; border-color: $teal100; color: $primary; }
 [data-testid="stDownloadButton"] button:hover {
     background: $teal100;
@@ -232,10 +243,12 @@ hr { border-color: $border; }
 button:focus-visible { outline: 3px solid rgba(20, 184, 166, 0.45); outline-offset: 2px; }
 
 /* Ikony na przyciskach (etykiety przycisków w Streamlit to czysty tekst) */
-[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="baseButton-secondary"] {
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="baseButton-secondary"],
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="stBaseButton-secondary"] {
     --hp-i: var(--hp-i-logout);
 }
-[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="baseButton-primary"] {
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="baseButton-primary"],
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="stBaseButton-primary"] {
     --hp-i: var(--hp-i-generate);
 }
 [data-testid="stDownloadButton"] button { --hp-i: var(--hp-i-excel); }
@@ -452,7 +465,9 @@ _LOGIN_CSS = Template("""
    na tym poziomie, więc :nth-of-type(2) jednoznacznie wskazuje środkową kolumnę – rozwiązanie
    odporne nawet w przeglądarkach bez obsługi :has() lub przy nieco innej strukturze DOM. */
 [data-testid="stAppViewContainer"] [data-testid="column"]:nth-of-type(2),
-[data-testid="stAppViewContainer"] [data-testid="column"]:has(.hp-login-head) {
+[data-testid="stAppViewContainer"] [data-testid="column"]:has(.hp-login-head),
+[data-testid="stAppViewContainer"] [data-testid="stColumn"]:nth-of-type(2),
+[data-testid="stAppViewContainer"] [data-testid="stColumn"]:has(.hp-login-head) {
     position: relative;
     z-index: 1;
     max-width: 440px;
@@ -474,8 +489,10 @@ _LOGIN_CSS = Template("""
 .hp-login-title { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.01em; color: $text; }
 .hp-login-sub { font-size: 0.93rem; color: $muted; }
 
-[data-testid="stButton"] [data-testid="baseButton-primary"] { --hp-i: var(--hp-i-login); margin-top: 0.5rem; }
-[data-testid="stButton"] [data-testid="baseButton-primary"]::before {$bg_icon}
+[data-testid="stButton"] [data-testid="baseButton-primary"],
+[data-testid="stButton"] [data-testid="stBaseButton-primary"] { --hp-i: var(--hp-i-login); margin-top: 0.5rem; }
+[data-testid="stButton"] [data-testid="baseButton-primary"]::before,
+[data-testid="stButton"] [data-testid="stBaseButton-primary"]::before {$bg_icon}
 """)
 
 
