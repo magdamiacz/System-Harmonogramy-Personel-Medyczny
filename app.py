@@ -50,8 +50,12 @@ def show_login():
     inject_login_css()
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        with st.container(border=False):
-            st.markdown(login_head_html(), unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(
+                '<div style="text-align:center"><h2>🏥 Harmonogram pracy</h2>'
+                '<p style="color:#556477;font-size:0.9rem">Zautomatyzowany System Generowania Harmonogramów</p></div>',
+                unsafe_allow_html=True
+            )
 
             username = st.text_input("Login", placeholder="Wpisz login")
             password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
