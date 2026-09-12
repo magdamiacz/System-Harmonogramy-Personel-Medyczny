@@ -55,7 +55,7 @@ def show_login():
         username = st.text_input("Login", placeholder="Wpisz login")
         password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
 
-        if st.button("Zaloguj się", use_container_width=True, type="primary"):
+        if st.button("🔓 Zaloguj się", use_container_width=True, type="primary"):
             correct_username = st.secrets.get("USERNAME", "pielegniarki")
             correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
 
@@ -133,14 +133,14 @@ with st.sidebar:
 
     # Przycisk generowania
     generuj_btn = st.button(
-        "Generuj harmonogram",
+        "✨ Generuj harmonogram",
         type="primary",
         use_container_width=True,
         key="generuj_btn",
     )
 
     # Wylogowanie
-    if st.button("Wyloguj się", use_container_width=True):
+    if st.button("🚪 Wyloguj się", use_container_width=True):
         st.session_state["logged_in"] = False
         st.rerun()
 

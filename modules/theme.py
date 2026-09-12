@@ -447,20 +447,7 @@ _LOGIN_CSS = Template("""
 }
 .block-container { padding-top: 9vh; }
 
-/* Karta logowania: stylowana przez pozycję środkowej z 3 kolumn (st.columns([1, 2, 1])),
-   NIE przez :has() + znacznik. st.columns() to jedyne miejsce w aplikacji używające kolumn
-   na tym poziomie, więc :nth-of-type(2) jednoznacznie wskazuje środkową kolumnę – rozwiązanie
-   odporne nawet w przeglądarkach bez obsługi :has() lub przy nieco innej strukturze DOM. */
-[data-testid="stAppViewContainer"] [data-testid="column"]:nth-of-type(2) {
-    position: relative;
-    z-index: 1;
-    max-width: 440px;
-    margin-inline: auto;
-    padding: 2.25rem 2rem 1.75rem;
-    background: $surface;
-    border-radius: 28px;
-    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55);
-}
+/* Karta logowania: stylizuje kontener zawierający .hp-login-head */
 .hp-login-head {
     display: flex;
     flex-direction: column;
@@ -468,6 +455,23 @@ _LOGIN_CSS = Template("""
     gap: 0.3rem;
     margin-bottom: 0.5rem;
     text-align: center;
+    padding: 2.25rem 2rem 1.75rem;
+    background: $surface;
+    border-radius: 28px;
+    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55);
+    max-width: 440px;
+    margin-left: auto;
+    margin-right: auto;
+    position: relative;
+    z-index: 1;
+}
+/* Pola tekstowe logowania – szerszość zgodna z kartą */
+.hp-login-head ~ [data-testid="stTextInput"],
+.hp-login-head ~ [data-testid="stTextInput"] ~ [data-testid="stTextInput"],
+.hp-login-head ~ [data-testid="stTextInput"] ~ [data-testid="stTextInput"] ~ [data-testid="stButton"] {
+    max-width: 440px;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 .hp-logo--lg { margin-bottom: 0.75rem; }
 .hp-login-title { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.01em; color: $text; }
