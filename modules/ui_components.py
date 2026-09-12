@@ -4,7 +4,8 @@
 #   - kolorowanie komórek przez CSS
 
 import datetime
-from typing import Dict, List, Optional, Set
+import html
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -27,6 +28,7 @@ from modules.theme import (
     build_legend_chips_html,
     get_text_color,
 )
+from modules.ui_html import card_head_html, normatyw_grid_html, section_title_html
 
 
 # Budowanie DataFrame harmonogramu
@@ -155,28 +157,39 @@ def _buduj_styled_df(
 def buduj_tekst_normatywu(
     state: HarmonogramState,
     liczba_dni_roboczych: int,
-) -> str:
+) -> List[Tuple[str, str, str]]:
     """
-    Zwraca tekst do nagłówka nad tabelą: jak obliczany jest normatyw
-    i jaka wychodzi końcówka do przypisania.
+    Zwraca pozycje karty normatywu (ikona, etykieta, wartość jako HTML):
+    jak obliczany jest normatyw i jaka wychodzi końcówka do przypisania.
     """
     # Reprezentatywny normatyw etatowy (zwykły pracownik)
     normatyw_min = liczba_dni_roboczych * WORK_MINUTES_PER_DAY_STANDARD
     pelne = normatyw_min // FULL_SHIFT_MINUTES
     koncowka = normatyw_min % FULL_SHIFT_MINUTES
-
-    normatyw_str = _minuty_na_str(normatyw_min)
-    koncowka_str = _minuty_na_str(koncowka) if koncowka > 0 else "—"
-
-    linie = [
-        f"**Normatyw etat** (zwykły): {liczba_dni_roboczych} dni roboczych × 7h35min = **{normatyw_str}**",
-        f"**Rozkład**: {pelne} dyżurów × 12h" + (f" + 1 × **{koncowka_str}** (końcówka DK)" if koncowka > 0 else ""),
-    ]
     # Normatyw z orzeczeniem
     norm_orz = liczba_dni_roboczych * WORK_MINUTES_PER_DAY_DISABILITY
-    linie.append(f"**Normatyw z orzeczeniem**: {liczba_dni_roboczych} × 7h = **{_minuty_na_str(norm_orz)}**")
-    linie.append("**Kontrakty**: duży min. 160h, mały min. 120h")
-    return " | ".join(linie)
+
+    def mocno(tekst: str) -> str:
+        return f"<strong>{html.escape(tekst)}</strong>"
+
+    rozklad = f"{pelne} dyżurów × 12h"
+    if koncowka > 0:
+        rozklad += f" + 1 × {mocno(_minuty_na_str(koncowka))} (końcówka DK)"
+
+    return [
+        (
+            "clock",
+            "Normatyw etat (zwykły)",
+            f"{liczba_dni_roboczych} dni roboczych × 7h35min = {mocno(_minuty_na_str(normatyw_min))}",
+        ),
+        ("calendar-days", "Rozkład", rozklad),
+        (
+            "user",
+            "Normatyw z orzeczeniem",
+            f"{liczba_dni_roboczych} × 7h = {mocno(_minuty_na_str(norm_orz))}",
+        ),
+        ("briefcase", "Kontrakty", "duży min. 160h, mały min. 120h"),
+    ]
 
 
 # Rekalkulacja po edycji
@@ -238,12 +251,16 @@ def renderuj_harmonogram(
     Edytor (st.data_editor) umożliwia ręczne poprawki.
     Po edycji zwraca zaktualizowany HarmonogramState, w przeciwnym razie None.
     """
-    st.subheader(label)
+    st.markdown(section_title_html("users", label), unsafe_allow_html=True)
 
     # Nagłówek: normatyw i końcówka
     if liczba_dni_roboczych > 0:
         with st.container(border=True):
-            st.markdown(buduj_tekst_normatywu(state, liczba_dni_roboczych))
+            st.markdown(card_head_html("clipboard-list", "Normatyw w tym miesiącu"), unsafe_allow_html=True)
+            st.markdown(
+                normatyw_grid_html(buduj_tekst_normatywu(state, liczba_dni_roboczych)),
+                unsafe_allow_html=True,
+            )
 
     # Legenda kolorów
     st.caption("Kolor komórki pokazuje typ zmiany — szczegóły w legendzie poniżej.")
@@ -278,7 +295,7 @@ def renderuj_harmonogram(
             width="small",
         )
 
-    with st.expander("✏️ Edytuj harmonogram", expanded=False):
+    with st.expander("Edytuj harmonogram", expanded=False):
         st.caption(
             "Ta tabela nie pokazuje kolorów. Wpisz kod zmiany w wybranej komórce — "
             "kolorowana tabela powyżej odświeży się automatycznie po zatwierdzeniu zmiany."
@@ -311,7 +328,7 @@ def renderuj_podsumowanie(
     Wyświetla tabelę podsumowującą pod harmonogramem.
     Zawiera: normatyw, przepracowane, bilans, liczniki dyżurów.
     """
-    st.markdown("#### Podsumowanie")
+    st.markdown(section_title_html("clipboard-check", "Podsumowanie"), unsafe_allow_html=True)
 
     podsumowanie = oblicz_podsumowanie(state, swieta)
     df = pd.DataFrame(podsumowanie)
@@ -365,7 +382,7 @@ def eksportuj_harmonogram(
             df_sum.to_excel(writer, sheet_name="Podsumowanie", index=False)
         buf.seek(0)
         st.download_button(
-            label="📊 Pobierz Excel (harmonogram + podsumowanie)",
+            label="Pobierz Excel (harmonogram + podsumowanie)",
             data=buf,
             file_name=f"harmonogram_{key_prefix}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

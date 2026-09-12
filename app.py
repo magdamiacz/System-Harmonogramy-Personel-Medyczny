@@ -14,17 +14,27 @@ from modules.normative import _minuty_na_str
 from modules.data_loader import grupuj_wg_harmonogramu, wczytaj_niedyspozycje, wczytaj_personel
 from modules.holidays import get_month_info
 from modules.scheduler import generuj_wszystkie_harmonogramy
-from modules.theme import inject_global_css
+from modules.icons import logo_svg
+from modules.theme import inject_global_css, inject_login_css
 from modules.ui_components import eksportuj_harmonogram, renderuj_harmonogram, renderuj_podsumowanie
+from modules.ui_html import (
+    brand_html,
+    card_head_html,
+    date_chips_html,
+    hero_html,
+    login_head_html,
+    section_title_html,
+    stat_cards_html,
+)
 
 
 # Konfiguracja strony
 
 st.set_page_config(
     page_title="Harmonogram pracy – personel medyczny",
-    page_icon="🏥",
+    page_icon=logo_svg(64, "fav"),
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 inject_global_css()
@@ -37,12 +47,11 @@ MIESIACE_PL = [
 
 # Login screen
 def show_login():
+    inject_login_css()
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.container(border=True):
-            st.title("🏥 Harmonogram pracy")
-            st.markdown("Zautomatyzowany System Generowania Harmonogramów")
-            st.divider()
+            st.markdown(login_head_html(), unsafe_allow_html=True)
 
             username = st.text_input("Login", placeholder="Wpisz login")
             password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
@@ -56,7 +65,7 @@ def show_login():
                     st.success("Zalogowano pomyślnie!")
                     st.rerun()
                 else:
-                    st.error("❌ Niepoprawny login lub hasło")
+                    st.error("Niepoprawny login lub hasło")
 
 
 if "logged_in" not in st.session_state:
@@ -68,21 +77,21 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 
-# Wylogowanie
-with st.sidebar:
-    if st.button("🚪 Wyloguj się", use_container_width=True):
-        st.session_state["logged_in"] = False
-        st.rerun()
-
-
-st.title("Zautomatyzowany System Generowania Harmonogramów Pracy")
-st.caption("Personel medyczny | Algorytm zachłanny")
+st.markdown(
+    hero_html(
+        "Zautomatyzowany System Generowania Harmonogramów Pracy",
+        "Personel medyczny · Algorytm zachłanny",
+    ),
+    unsafe_allow_html=True,
+)
 
 # Sidebar: parametry i import danych
 
 with st.sidebar:
+    st.markdown(brand_html(), unsafe_allow_html=True)
+
     with st.container(border=True):
-        st.header("📅 Parametry")
+        st.markdown(card_head_html("calendar-days", "Parametry"), unsafe_allow_html=True)
 
         # Wybór miesiąca i roku
         teraz = datetime.date.today()
@@ -103,7 +112,7 @@ with st.sidebar:
         )
 
     with st.container(border=True):
-        st.header("📁 Import danych")
+        st.markdown(card_head_html("folder-up", "Import danych"), unsafe_allow_html=True)
 
         # Plik personelu
         personel_file = st.file_uploader(
@@ -130,6 +139,11 @@ with st.sidebar:
         use_container_width=True,
         key="generuj_btn",
     )
+
+    # Wylogowanie
+    if st.button("Wyloguj się", use_container_width=True):
+        st.session_state["logged_in"] = False
+        st.rerun()
 
 
 # Główna logika: wczytaj dane i wygeneruj harmonogram
@@ -218,7 +232,7 @@ info = st.session_state.get("info_miesiaca")
 
 if not harmonogramy:
     # Ekran powitalny przed wygenerowaniem
-    st.markdown("### 👋 Zacznij tutaj")
+    st.markdown(section_title_html("clipboard-list", "Zacznij tutaj"), unsafe_allow_html=True)
     st.info(
         "Wgraj plik personelu w panelu bocznym i kliknij **Generuj harmonogram**, "
         "aby zobaczyć rozkład zmian."
@@ -247,11 +261,14 @@ else:
     nazwa_miesiaca = f"{MIESIACE_PL[int(miesiac) - 1]} {rok}"
     normatyw_str = _minuty_na_str(info["liczba_dni_roboczych"] * WORK_MINUTES_PER_DAY_STANDARD)
 
-    with st.container(border=True):
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Miesiąc", nazwa_miesiaca)
-        col_m2.metric("Dni robocze", info["liczba_dni_roboczych"])
-        col_m3.metric("Normatyw etat", normatyw_str)
+    st.markdown(
+        stat_cards_html([
+            ("calendar-days", "Miesiąc", nazwa_miesiaca),
+            ("briefcase", "Dni robocze", info["liczba_dni_roboczych"]),
+            ("clock", "Normatyw etat", normatyw_str),
+        ]),
+        unsafe_allow_html=True,
+    )
 
     # Listowanie świąt w miesiącu
     swieta_w_miesiacu = sorted([
@@ -259,7 +276,7 @@ else:
         if d.month == int(miesiac) and d.year == int(rok)
     ])
     if swieta_w_miesiacu:
-        st.caption("🎉 Święta w tym miesiącu: " + ", ".join(str(d) for d in swieta_w_miesiacu))
+        st.markdown(date_chips_html("Święta w tym miesiącu", swieta_w_miesiacu), unsafe_allow_html=True)
 
     # Zakładki – jedna na harmonogram
     dostepne_klucze = [k for k in SCHEDULE_KEYS if k in harmonogramy]
