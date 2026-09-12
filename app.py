@@ -50,21 +50,22 @@ def show_login():
     inject_login_css()
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown(login_head_html(), unsafe_allow_html=True)
+        with st.container(border=False):
+            st.markdown(login_head_html(), unsafe_allow_html=True)
 
-        username = st.text_input("Login", placeholder="Wpisz login")
-        password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
+            username = st.text_input("Login", placeholder="Wpisz login")
+            password = st.text_input("Hasło", type="password", placeholder="Wpisz hasło")
 
-        if st.button("🔓 Zaloguj się", use_container_width=True, type="primary"):
-            correct_username = st.secrets.get("USERNAME", "pielegniarki")
-            correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
+            if st.button("🔓 Zaloguj się", use_container_width=True, type="primary"):
+                correct_username = st.secrets.get("USERNAME", "pielegniarki")
+                correct_password = st.secrets.get("PASSWORD", "harmonogram2024")
 
-            if username == correct_username and password == correct_password:
-                st.session_state["logged_in"] = True
-                st.success("Zalogowano pomyślnie!")
-                st.rerun()
-            else:
-                st.error("Niepoprawny login lub hasło")
+                if username == correct_username and password == correct_password:
+                    st.session_state["logged_in"] = True
+                    st.success("Zalogowano pomyślnie!")
+                    st.rerun()
+                else:
+                    st.error("Niepoprawny login lub hasło")
 
 
 if "logged_in" not in st.session_state:

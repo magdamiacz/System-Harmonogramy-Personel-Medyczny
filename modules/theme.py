@@ -447,7 +447,18 @@ _LOGIN_CSS = Template("""
 }
 .block-container { padding-top: 9vh; }
 
-/* Karta logowania: stylizuje kontener zawierający .hp-login-head */
+/* Karta logowania: cały kontener (st.container) stylizowany jako biała karta */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hp-login-head) {
+    background: $surface !important;
+    border-radius: 28px !important;
+    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55) !important;
+    max-width: 440px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding: 2.25rem 2rem 1.75rem !important;
+    position: relative;
+    z-index: 1;
+}
 .hp-login-head {
     display: flex;
     flex-direction: column;
@@ -455,23 +466,6 @@ _LOGIN_CSS = Template("""
     gap: 0.3rem;
     margin-bottom: 0.5rem;
     text-align: center;
-    padding: 2.25rem 2rem 1.75rem;
-    background: $surface;
-    border-radius: 28px;
-    box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55);
-    max-width: 440px;
-    margin-left: auto;
-    margin-right: auto;
-    position: relative;
-    z-index: 1;
-}
-/* Pola tekstowe logowania – szerszość zgodna z kartą */
-.hp-login-head ~ [data-testid="stTextInput"],
-.hp-login-head ~ [data-testid="stTextInput"] ~ [data-testid="stTextInput"],
-.hp-login-head ~ [data-testid="stTextInput"] ~ [data-testid="stTextInput"] ~ [data-testid="stButton"] {
-    max-width: 440px;
-    margin-left: auto !important;
-    margin-right: auto !important;
 }
 .hp-logo--lg { margin-bottom: 0.75rem; }
 .hp-login-title { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.01em; color: $text; }
