@@ -1,4 +1,4 @@
-# Ikony liniowe (Lucide, licencja ISC) jako inline SVG, maski CSS oraz logo aplikacji.
+# Ikony liniowe (Lucide, licencja ISC) jako inline SVG, tła CSS (background-image) oraz logo aplikacji.
 
 from typing import Dict
 from urllib.parse import quote
@@ -87,9 +87,13 @@ def icon(name: str, size: int = 18, cls: str = "hp-ico") -> str:
     )
 
 
-def icon_mask_url(name: str) -> str:
-    """Ikona jako data-URI do CSS mask-image (kolor nadaje background-color)."""
-    svg = f'<svg xmlns="http://www.w3.org/2000/svg" {_SVG_ATTRS} stroke="#000">{_ICONS[name]}</svg>'
+def icon_bg_url(name: str, color: str) -> str:
+    """Ikona jako data-URI do CSS background-image, z kolorem obrysu zapisanym na sztywno.
+
+    Używane zamiast mask-image: background-image z data-URI ma dużo szersze i bardziej
+    jednolite wsparcie przeglądarek (bez potrzeby prefiksów, mniej podatne na różnice w CSP).
+    """
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" {_SVG_ATTRS} stroke="{color}">{_ICONS[name]}</svg>'
     return f'url("data:image/svg+xml,{quote(svg, safe="")}")'
 
 

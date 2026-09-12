@@ -7,7 +7,7 @@ import html
 from string import Template
 from typing import Dict, Tuple
 
-from modules.icons import icon_mask_url
+from modules.icons import icon_bg_url
 
 # Paleta bazowa (kontrast tekstu zgodny z WCAG AA)
 
@@ -116,31 +116,28 @@ _TOKENS: Dict[str, str] = {
     "teal600": COLOR_TEAL_600,
     "text": COLOR_TEXT,
     "muted": COLOR_TEXT_MUTED,
-    "i_logout": icon_mask_url("log-out"),
-    "i_login": icon_mask_url("log-in"),
-    "i_generate": icon_mask_url("sparkles"),
-    "i_excel": icon_mask_url("file-spreadsheet"),
-    "i_error": icon_mask_url("circle-alert"),
-    "i_warning": icon_mask_url("triangle-alert"),
-    "i_info": icon_mask_url("info"),
-    "i_success": icon_mask_url("circle-check"),
+    # Ikony jako background-image (nie mask-image): szersze i bardziej jednolite wsparcie
+    # przeglądarek, mniej podatne na różnice w CSP niż maski. Kolor jest zapisany na sztywno
+    # w SVG dopasowanym do tła, na którym dana ikona się pojawia.
+    "i_logout": icon_bg_url("log-out", COLOR_TEXT),
+    "i_login": icon_bg_url("log-in", "#FFFFFF"),
+    "i_generate": icon_bg_url("sparkles", "#FFFFFF"),
+    "i_excel": icon_bg_url("file-spreadsheet", COLOR_PRIMARY),
+    "i_error": icon_bg_url("circle-alert", "#B3261E"),
+    "i_warning": icon_bg_url("triangle-alert", "#92400E"),
+    "i_info": icon_bg_url("info", "#1D4ED8"),
+    "i_success": icon_bg_url("circle-check", "#15803D"),
 }
 
-# Karta = kontener z border=True, którego pierwszy element zawiera znacznik (klasę) nagłówka.
-# Samo stVerticalBlockBorderWrapper ma każdy blok, więc bez :has() wszystko stałoby się kartą.
-_CARD = (
-    '[data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]'
-    ' > [data-testid="element-container"] .{marker})'
-)
-
-_MASK_ICON = """
+_BG_ICON = """
     content: "";
     width: 18px;
     height: 18px;
     flex: 0 0 18px;
-    background-color: currentColor;
-    -webkit-mask: var(--hp-i) no-repeat center / contain;
-    mask: var(--hp-i) no-repeat center / contain;
+    background-image: var(--hp-i);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
 """
 
 _GLOBAL_CSS = Template("""
@@ -180,8 +177,8 @@ hr { border-color: $border; }
 /* Sidebar */
 [data-testid="stSidebar"] { border-right: 1px solid $border; }
 
-/* Karty */
-$card {
+/* Karty (znacznik .hp-card-head w pierwszym elemencie karty, wykrywany przez :has()) */
+[data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .hp-card-head) {
     background: $surface;
     border: 1px solid $border;
     border-radius: 20px;
@@ -243,7 +240,7 @@ button:focus-visible { outline: 3px solid rgba(20, 184, 166, 0.45); outline-offs
 }
 [data-testid="stDownloadButton"] button { --hp-i: var(--hp-i-excel); }
 [data-testid="stSidebar"] [data-testid="stButton"] button::before,
-[data-testid="stDownloadButton"] button::before {$mask_icon}
+[data-testid="stDownloadButton"] button::before {$bg_icon}
 
 /* Komunikaty: ikona zależna od typu */
 [data-testid="stNotification"] { border-radius: 14px; }
@@ -254,7 +251,7 @@ button:focus-visible { outline: 3px solid rgba(20, 184, 166, 0.45); outline-offs
 [data-testid="stNotificationContentError"] > div::before,
 [data-testid="stNotificationContentWarning"] > div::before,
 [data-testid="stNotificationContentInfo"] > div::before,
-[data-testid="stNotificationContentSuccess"] > div::before {$mask_icon}
+[data-testid="stNotificationContentSuccess"] > div::before {$bg_icon}
 
 /* Zakładki jako segmentowane pigułki */
 [data-testid="stTabs"] [data-baseweb="tab-list"] {
@@ -450,14 +447,17 @@ _LOGIN_CSS = Template("""
 }
 .block-container { padding-top: 9vh; }
 
-$login_card {
+/* Karta logowania: stylowana przez pozycję środkowej z 3 kolumn (st.columns([1, 2, 1])),
+   NIE przez :has() + znacznik. st.columns() to jedyne miejsce w aplikacji używające kolumn
+   na tym poziomie, więc :nth-of-type(2) jednoznacznie wskazuje środkową kolumnę – rozwiązanie
+   odporne nawet w przeglądarkach bez obsługi :has() lub przy nieco innej strukturze DOM. */
+[data-testid="stAppViewContainer"] [data-testid="column"]:nth-of-type(2) {
     position: relative;
     z-index: 1;
     max-width: 440px;
     margin-inline: auto;
     padding: 2.25rem 2rem 1.75rem;
     background: $surface;
-    border: none;
     border-radius: 28px;
     box-shadow: 0 32px 70px -24px rgba(4, 47, 46, 0.55);
 }
@@ -474,26 +474,23 @@ $login_card {
 .hp-login-sub { font-size: 0.93rem; color: $muted; }
 
 [data-testid="stButton"] [data-testid="baseButton-primary"] { --hp-i: var(--hp-i-login); margin-top: 0.5rem; }
-[data-testid="stButton"] [data-testid="baseButton-primary"]::before {$mask_icon}
+[data-testid="stButton"] [data-testid="baseButton-primary"]::before {$bg_icon}
 """)
 
 
 def _style(template: Template, **extra: str) -> str:
-    return "<style>" + template.substitute(_TOKENS, mask_icon=_MASK_ICON, **extra) + "</style>"
+    return "<style>" + template.substitute(_TOKENS, bg_icon=_BG_ICON, **extra) + "</style>"
 
 
 def inject_global_css() -> None:
     """Wstrzykuje statyczny, autorski CSS aplikacji (bez danych użytkownika – brak ryzyka XSS)."""
     import streamlit as st
 
-    st.markdown(_style(_GLOBAL_CSS, card=_CARD.format(marker="hp-card-head")), unsafe_allow_html=True)
+    st.markdown(_style(_GLOBAL_CSS), unsafe_allow_html=True)
 
 
 def inject_login_css() -> None:
     """CSS wyłącznie dla ekranu logowania; znika przy kolejnym przebiegu skryptu."""
     import streamlit as st
 
-    st.markdown(
-        _style(_LOGIN_CSS, login_card=_CARD.format(marker="hp-login-head")),
-        unsafe_allow_html=True,
-    )
+    st.markdown(_style(_LOGIN_CSS), unsafe_allow_html=True)
