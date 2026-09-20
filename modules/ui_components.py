@@ -17,9 +17,10 @@ from config import (
     WORK_MINUTES_PER_DAY_STANDARD,
     WORKING_SHIFTS,
 )
+from modules.absences import minuty_absencji, parse_absencja
 from modules.data_loader import Pracownik
 from modules.holidays import czy_swieto, czy_weekend, czy_niedziela
-from modules.normative import _minuty_na_str
+from modules.normative import _minuty_na_str, oblicz_normatywy
 from modules.scheduler import HarmonogramState, oblicz_podsumowanie
 from modules.theme import (
     BALANCE_COLORS,
@@ -109,6 +110,23 @@ def buduj_df_do_edycji(
 
 # Nagłówek normatywu i końcówki
 
+def _kolor_kodu(kod: str) -> str:
+    """Kolor tła dla kodu w komórce.
+
+    Kody urlopu niosą liczbę godzin ("U12"), której paleta nie zna – biorą wtedy
+    kolor swojego rodzaju ("U"), żeby urlop był widoczny tak samo niezależnie od
+    wpisanej liczby.
+    """
+    if not kod:
+        return ""
+    if kod in SHIFT_COLORS:
+        return SHIFT_COLORS[kod]
+    rozbite = parse_absencja(kod)
+    if rozbite is not None:
+        return SHIFT_COLORS.get(rozbite[0], "")
+    return ""
+
+
 def _buduj_styled_df(
     df: pd.DataFrame,
     dni: List[datetime.date],
@@ -141,7 +159,7 @@ def _buduj_styled_df(
         styles = []
         for val in col:
             v = str(val).strip() if val else ""
-            shift_bg = SHIFT_COLORS.get(v, "") if v else ""
+            shift_bg = _kolor_kodu(v)
             bg = shift_bg if shift_bg else col_bg
             if bg:
                 txt = f"color: {get_text_color(bg)};"
@@ -201,12 +219,48 @@ def rekalkuluj_state_po_edycji(
 ) -> HarmonogramState:
     """
     Aktualizuje HarmonogramState na podstawie edytowanej tabeli.
-    Zeruje przepracowane minuty i liczy od nowa z nowych przydziałów.
+
+    Trzy przebiegi, w tej właśnie kolejności:
+      1. odczytanie kodów z tabeli i zsumowanie godzin urlopu,
+      2. przeliczenie normatywów (urlop je pomniejsza),
+      3. wyzerowanie liczników i odtworzenie przydziałów.
+
+    Kolejność jest istotna: przydziel() odczytuje koncowka_minuty w momencie
+    zapisu, więc odtwarzanie grafiku na starych normatywach wyceniłoby dyżur DK
+    według nieaktualnej długości.
     """
     NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
     col_to_date = {f"{NAZWY_DNI[d.weekday()]} {d.day}": d for d in dni}
 
-    # Zeruj liczniki
+    # 1. Odczyt tabeli
+    nowe_przydzialy: Dict[str, Dict[datetime.date, str]] = {}
+    for _, row in df_edytowany.iterrows():
+        imie = row["Imię i nazwisko"]
+        if imie not in state.przydzial:
+            continue
+        przydzial: Dict[datetime.date, str] = {}
+        for col, data in col_to_date.items():
+            if col not in df_edytowany.columns:
+                continue
+            val = row.get(col, "")
+            kod = "" if (pd.isna(val) or val is None) else str(val).strip().upper()
+            if kod in ("", "NAN", "NONE", "NAT"):
+                continue
+            przydzial[data] = kod
+        nowe_przydzialy[imie] = przydzial
+
+    # 2. Normatywy z uwzględnieniem urlopów wpisanych ręcznie w tabeli
+    dni_robocze = next(iter(state.normatywy.values())).dni_robocze if state.normatywy else 0
+    minuty_urlopow = {
+        p.imie_nazwisko: sum(
+            minuty_absencji(kod, p.orzeczenie)
+            for kod in nowe_przydzialy.get(p.imie_nazwisko, {}).values()
+        )
+        for p in state.pracownicy
+    }
+    state.normatywy = oblicz_normatywy(state.pracownicy, dni_robocze, minuty_urlopow)
+
+    # 3. Wyzerowanie liczników i odtworzenie przydziałów
     for p in state.pracownicy:
         imie = p.imie_nazwisko
         state.przydzial[imie] = {}
@@ -214,25 +268,40 @@ def rekalkuluj_state_po_edycji(
                      "liczba_swiatecznych", "liczba_dziennych"):
             getattr(state, attr)[imie] = 0
 
-    # Wczytaj nowe przydziały
-    for _, row in df_edytowany.iterrows():
-        imie = row["Imię i nazwisko"]
-        if imie not in state.przydzial:
-            continue
-        for col, data in col_to_date.items():
-            if col not in df_edytowany.columns:
-                continue
-            val = row.get(col, "")
-            if pd.isna(val) or val is None:
-                kod = ""
-            else:
-                kod = str(val).strip().upper()
-            if kod in ("", "NAN", "NONE", "NAT"):
-                kod = ""
-            if kod:
-                state.przydziel(imie, data, kod)
+    for imie, przydzial in nowe_przydzialy.items():
+        for data, kod in przydzial.items():
+            state.przydziel(imie, data, kod)
 
     return state
+
+
+# Braki obsady
+
+def _renderuj_braki(braki: List[dict], dni: List[datetime.date]) -> None:
+    """Pokazuje dni, w których nie udało się zebrać wymaganej obsady.
+
+    Algorytm nigdy nie łamie reguł bezpieczeństwa pracy – gdy nie ma kogo
+    przydzielić, zostawia lukę. Bez tej listy taka luka byłaby niewidoczna.
+    """
+    NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
+    NAZWY_TYPOW = {"D": "dzienna", "N": "nocna", "R": "zmiana R"}
+
+    brakujace = sum(b["wymagane"] - b["obsadzone"] for b in braki)
+    st.error(
+        f"Nie udało się obsadzić {brakujace} dyżurów "
+        f"({len(braki)} pozycji w grafiku). Uzupełnij je ręcznie w edytorze poniżej."
+    )
+    with st.expander(f"Pokaż brakującą obsadę ({len(braki)})"):
+        wiersze = [
+            {
+                "Dzień": f"{NAZWY_DNI[b['data'].weekday()]} {b['data'].day}",
+                "Zmiana": NAZWY_TYPOW.get(b["typ"], b["typ"]),
+                "Obsadzone": b["obsadzone"],
+                "Wymagane": b["wymagane"],
+            }
+            for b in braki
+        ]
+        st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
 
 
 # Renderowanie tabeli harmonogramu
@@ -252,6 +321,10 @@ def renderuj_harmonogram(
     Po edycji zwraca zaktualizowany HarmonogramState, w przeciwnym razie None.
     """
     st.markdown(section_title_html("users", label), unsafe_allow_html=True)
+
+    # Braki obsady – zanim użytkownik zobaczy grafik
+    if getattr(state, "braki", None):
+        _renderuj_braki(state.braki, dni)
 
     # Nagłówek: normatyw i końcówka
     if liczba_dni_roboczych > 0:
@@ -289,10 +362,13 @@ def renderuj_harmonogram(
     }
     for d in dni:
         col_name = f"{NAZWY_DNI[d.weekday()]} {d.day}"
-        col_config[col_name] = st.column_config.SelectboxColumn(
+        # Pole tekstowe, a nie lista wyboru: urlop niesie liczbę godzin ("U12"),
+        # więc zbiór dopuszczalnych wartości jest otwarty.
+        col_config[col_name] = st.column_config.TextColumn(
             label=col_name,
-            options=["", "D", "N", "DN", "R", "DK", "U", "UM", "W"],
             width="small",
+            validate=r"^(|D|N|DN|R|DK|W|U\d{0,2}|UM\d{0,2})$",
+            help="Kody zmian: D, N, DN, R, DK, W. Urlop: U, U12, UM, UM8.",
         )
 
     with st.expander("Edytuj harmonogram", expanded=False):
