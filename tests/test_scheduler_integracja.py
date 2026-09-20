@@ -1,40 +1,68 @@
-"""Test integracyjny: pełna generacja na prawdziwych danych personelu.
+"""Test integracyjny: pełna generacja na syntetycznym zespole.
 
 Sprawdza reguły, których nie da się potwierdzić w izolacji – czy algorytm
 faktycznie ich przestrzega po przejściu wszystkich sześciu faz, łącznie z fazą
 awaryjną, która kiedyś omijała główną bramkę ograniczeń.
+
+Zespół jest wymyślony, ale liczebnością i strukturą umów odwzorowuje prawdziwy,
+żeby reguła nocek była realnie obciążona. Testy celowo nie korzystają z pliku
+z prawdziwymi nazwiskami – to dane osobowe personelu.
 """
 
 import datetime
-from pathlib import Path
 
 import pytest
 
-from config import NIGHT_SHIFTS, WORKING_SHIFTS
-from modules.data_loader import grupuj_wg_harmonogramu, wczytaj_personel
+from config import NIGHT_SHIFTS, WORKING_SHIFTS, get_schedule_key
+from modules.data_loader import Pracownik, grupuj_wg_harmonogramu
 from modules.holidays import get_month_info
 from modules.scheduler import generuj_wszystkie_harmonogramy
 
-CSV_PERSONEL = Path(__file__).resolve().parent.parent / "personel_wlasciwy.csv"
+# (oddział, rola, liczba etatów, dużych kontraktów, małych kontraktów, ilu tylko_7h)
+SKLAD_ZESPOLU = [
+    ("wewnętrzny",      "pielęgniarki", 7,  3, 3, 1),
+    ("gastrologiczny",  "pielęgniarki", 10, 2, 0, 1),
+    ("gastrologiczny",  "opiekunki",    6,  0, 0, 0),
+    ("oiok",            "pielęgniarki", 5,  1, 2, 1),
+    ("wewnętrzny/oiok", "opiekunki",    12, 0, 0, 0),
+]
+
+
+def zbuduj_zespol() -> list:
+    pracownicy = []
+    licznik = 0
+    for oddzial, rola, etaty, duze, male, tylko_7h_ilu in SKLAD_ZESPOLU:
+        typy = ["etat"] * etaty + ["duzy_kontrakt"] * duze + ["maly_kontrakt"] * male
+        for numer, typ in enumerate(typy):
+            licznik += 1
+            pracownicy.append(
+                Pracownik(
+                    imie_nazwisko=f"Osoba {licznik:03d}",
+                    oddzial=oddzial,
+                    rola=rola,
+                    typ_umowy=typ,
+                    orzeczenie=False,
+                    # tylko_7h dotyczy wyłącznie etatowców – tak jest w prawdziwych danych
+                    tylko_7h=(typ == "etat" and numer < tylko_7h_ilu),
+                    pracuje_w_weekendy=True,
+                    schedule_key=get_schedule_key(oddzial, rola),
+                )
+            )
+    return pracownicy
 
 
 @pytest.fixture(scope="module")
 def harmonogramy():
-    if not CSV_PERSONEL.exists():
-        pytest.skip(f"Brak pliku z danymi: {CSV_PERSONEL}")
-    pracownicy, _ = wczytaj_personel(str(CSV_PERSONEL))
     info = get_month_info(2026, 5)
-    return (
-        generuj_wszystkie_harmonogramy(
-            grupy=grupuj_wg_harmonogramu(pracownicy),
-            rok=2026,
-            miesiac=5,
-            dni=info["dni"],
-            swieta=info["swieta"],
-            liczba_dni_roboczych=info["liczba_dni_roboczych"],
-        ),
-        info,
+    stany = generuj_wszystkie_harmonogramy(
+        grupy=grupuj_wg_harmonogramu(zbuduj_zespol()),
+        rok=2026,
+        miesiac=5,
+        dni=info["dni"],
+        swieta=info["swieta"],
+        liczba_dni_roboczych=info["liczba_dni_roboczych"],
     )
+    return stany, info
 
 
 def serie_nocek(przydzial: dict, dni: list) -> list:
@@ -52,9 +80,21 @@ def serie_nocek(przydzial: dict, dni: list) -> list:
     return serie
 
 
-def test_generacja_nie_wyrzuca_wyjatku(harmonogramy):
+def test_generuje_harmonogram_dla_kazdej_grupy(harmonogramy):
     stany, _ = harmonogramy
-    assert stany, "Nie wygenerowano żadnego harmonogramu"
+    assert len(stany) == len(SKLAD_ZESPOLU)
+
+
+def test_ktos_faktycznie_dostal_nocki(harmonogramy):
+    """Zabezpiecza pozostałe testy – na pustym grafiku przeszłyby bez sensu."""
+    stany, info = harmonogramy
+    wszystkie = [
+        dlugosc
+        for state in stany.values()
+        for p in state.pracownicy
+        for dlugosc in serie_nocek(state.przydzial[p.imie_nazwisko], info["dni"])
+    ]
+    assert wszystkie, "Nikt nie dostał ani jednej nocki – test nic by nie sprawdzał"
 
 
 def test_nikt_nie_ma_trzech_nocek_pod_rzad(harmonogramy):
@@ -111,12 +151,8 @@ def test_etatowcy_nie_przekraczaja_normatywu(harmonogramy):
     assert not winni, "Etatowcy z nadgodzinami:\n" + "\n".join(winni)
 
 
-def test_nikt_nie_ma_dwoch_zmian_tego_samego_dnia(harmonogramy):
+def test_przydzialy_miesczą_sie_w_miesiacu(harmonogramy):
     stany, info = harmonogramy
     for state in stany.values():
         for p in state.pracownicy:
-            przydzial = state.przydzial[p.imie_nazwisko]
-            for data, kod in przydzial.items():
-                assert isinstance(kod, str)
-            # słownik z definicji ma jeden kod na dzień – sprawdzamy zakres dat
-            assert set(przydzial).issubset(set(info["dni"]))
+            assert set(state.przydzial[p.imie_nazwisko]).issubset(set(info["dni"]))
