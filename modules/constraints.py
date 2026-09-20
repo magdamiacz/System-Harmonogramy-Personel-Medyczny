@@ -301,9 +301,15 @@ def sprawdz_niedyspozycje(
     data: datetime.date,
 ) -> bool:
     """
-    Zwraca True, jeśli pracownik NIE jest na niedyspozycji w danym dniu.
+    Zwraca True, jeśli pracownik jest tego dnia dostępny.
+
+    Blokuje zarówno niedyspozycje, jak i dni urlopu. Urlopy trzymamy w osobnym
+    polu, bo niosą liczbę godzin i muszą być rozróżnialne w raportach – ale dla
+    przydziału dyżuru skutek jest ten sam: tego dnia pracownik nie pracuje.
     """
-    return data not in pracownik.niedyspozycje
+    if data in pracownik.niedyspozycje:
+        return False
+    return data not in pracownik.absencje
 
 
 # Ograniczenie 5: bilans godzin (etatowcy nie mogą mieć nadgodzin)

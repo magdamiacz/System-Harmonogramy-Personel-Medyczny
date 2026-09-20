@@ -28,6 +28,14 @@ class Pracownik:
     # Niedyspozycje (daty, kiedy pracownik jest niedostępny)
     niedyspozycje: Set[datetime.date] = field(default_factory=set)
 
+    # Urlopy: data -> kod urlopu ("U", "U12", "UM8").
+    # Godziny z tych kodów pomniejszają normatyw – patrz modules/absences.py.
+    absencje: Dict[datetime.date, str] = field(default_factory=dict)
+
+    # Prośby pracownika: data -> "wolne" albo kod zmiany ("D", "N").
+    # Miękkie – algorytm stara się je spełnić, ale obsada ma pierwszeństwo.
+    prosby: Dict[datetime.date, str] = field(default_factory=dict)
+
     def __hash__(self):
         return hash(self.imie_nazwisko)
 

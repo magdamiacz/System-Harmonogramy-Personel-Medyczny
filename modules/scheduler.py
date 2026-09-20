@@ -18,6 +18,7 @@ from config import (
     WORK_MINUTES_PER_DAY_STANDARD,
     WORKING_SHIFTS,
 )
+from modules.absences import suma_minut_absencji
 from modules.constraints import (
     czy_mozna_przydzielic,
     czy_mozna_przydzielic_awaryjnie,
@@ -171,6 +172,22 @@ def score_pracownik(p: Pracownik, data: datetime.date, kod: str, state: Harmonog
             score -= 500
 
     return score
+
+
+# Faza 0: Urlopy wpisane z góry
+
+def faza_0_absencje(state: HarmonogramState) -> None:
+    """Wpisuje urlopy do grafiku, zanim algorytm zacznie przydzielać dyżury.
+
+    Kody urlopowe nie należą do WORKING_SHIFTS, więc nie dokładają minut do
+    przepracowanych – godziny urlopu zostały już odliczone od normatywu.
+    Wpisanie ich tutaj sprawia, że dzień jest zajęty i żadna faza go nie nadpisze.
+    """
+    dni_miesiaca = set(state.dni)
+    for p in state.pracownicy:
+        for data, kod in p.absencje.items():
+            if data in dni_miesiaca:
+                state.przydziel(p.imie_nazwisko, data, kod)
 
 
 # Faza 1: Zmiany R dla pracowników tylko_7h
@@ -479,7 +496,7 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
             )
             for p in kandydaci:
                 imie = p.imie_nazwisko
-                if data in p.niedyspozycje:
+                if data in p.niedyspozycje or data in p.absencje:
                     continue
                 if state.get_przydzial(imie, data) != "":
                     continue
@@ -539,10 +556,17 @@ def generuj_harmonogram_grupy(
     liczba_dni_roboczych: int,
 ) -> HarmonogramState:
     """Generuje harmonogram dla jednej grupy pracowników (np. gastro_piel)."""
-    normatywy = oblicz_normatywy(pracownicy, liczba_dni_roboczych)
+    # Normatywy muszą być OSTATECZNE przed pierwszym przydziałem: przydziel()
+    # odczytuje koncowka_minuty w momencie zapisu, a urlop zmienia jej długość.
+    minuty_absencji = {
+        p.imie_nazwisko: suma_minut_absencji(p.absencje, dni, p.orzeczenie)
+        for p in pracownicy
+    }
+    normatywy = oblicz_normatywy(pracownicy, liczba_dni_roboczych, minuty_absencji)
     norm = STAFFING_NORMS[schedule_key]
     state = HarmonogramState(pracownicy, normatywy, dni, swieta)
 
+    faza_0_absencje(state)
     faza_1_r_shifts(state)
     faza_2_kontrakty(state, norm)
     faza_3_obsada(state, norm)

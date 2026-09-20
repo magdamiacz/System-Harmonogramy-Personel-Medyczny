@@ -156,3 +156,57 @@ def test_przydzialy_miesczą_sie_w_miesiacu(harmonogramy):
     for state in stany.values():
         for p in state.pracownicy:
             assert set(state.przydzial[p.imie_nazwisko]).issubset(set(info["dni"]))
+
+
+class TestUrlopWCalejSciezce:
+    """Urlop wpisany pracownikowi ma zejść z normatywu i zablokować dzień."""
+
+    @staticmethod
+    def wygeneruj(absencje: dict):
+        zespol = zbuduj_zespol()
+        urlopowicz = next(p for p in zespol if p.is_etat and not p.tylko_7h)
+        urlopowicz.absencje = dict(absencje)
+        info = get_month_info(2026, 5)
+        stany = generuj_wszystkie_harmonogramy(
+            grupy=grupuj_wg_harmonogramu(zespol),
+            rok=2026,
+            miesiac=5,
+            dni=info["dni"],
+            swieta=info["swieta"],
+            liczba_dni_roboczych=info["liczba_dni_roboczych"],
+        )
+        state = stany[urlopowicz.schedule_key]
+        return state, urlopowicz.imie_nazwisko, info
+
+    def test_urlop_obniza_normatyw_o_wpisane_godziny(self):
+        dzien = datetime.date(2026, 5, 12)
+        bez, imie, _ = self.wygeneruj({})
+        z_urlopem, _, _ = self.wygeneruj({dzien: "U12"})
+        assert z_urlopem.normatywy[imie].minuty == bez.normatywy[imie].minuty - 720
+        assert z_urlopem.normatywy[imie].minuty_absencji == 720
+
+    def test_dzien_urlopu_widnieje_w_grafiku(self):
+        dzien = datetime.date(2026, 5, 12)
+        state, imie, _ = self.wygeneruj({dzien: "U12"})
+        assert state.get_przydzial(imie, dzien) == "U12"
+
+    def test_w_dniu_urlopu_nie_ma_dyzuru(self):
+        dzien = datetime.date(2026, 5, 12)
+        state, imie, _ = self.wygeneruj({dzien: "U12"})
+        assert state.get_przydzial(imie, dzien) not in WORKING_SHIFTS
+
+    def test_urlop_nie_zwieksza_przepracowanych_godzin(self):
+        """Urlop schodzi z normatywu – nie wolno go liczyć jako pracy."""
+        dzien = datetime.date(2026, 5, 12)
+        state, imie, info = self.wygeneruj({dzien: "U12"})
+        z_dyzurow = sum(
+            1 for kod in state.przydzial[imie].values() if kod in WORKING_SHIFTS
+        )
+        # przepracowane liczone tylko z dyżurów; U12 nie może ich podbić
+        assert state.przepracowane[imie] <= z_dyzurow * 720
+
+    def test_samo_U_zdejmuje_norme_dobowa(self):
+        dzien = datetime.date(2026, 5, 12)
+        bez, imie, _ = self.wygeneruj({})
+        z_urlopem, _, _ = self.wygeneruj({dzien: "U"})
+        assert z_urlopem.normatywy[imie].minuty == bez.normatywy[imie].minuty - 455
