@@ -68,6 +68,11 @@ class HarmonogramState:
         self.liczba_swiatecznych:Dict[str, int] = {n: 0 for n in names}
         self.liczba_dziennych:   Dict[str, int] = {n: 0 for n in names}
 
+        # Dni, w których nie udało się zebrać wymaganej obsady.
+        # Algorytm nie zgłasza błędu, gdy nikogo nie da się przydzielić – bez tej
+        # listy niedobór byłby całkowicie niewidoczny dla użytkownika.
+        self.braki: List[dict] = []
+
     def przydziel(self, imie: str, data: datetime.date, kod: str) -> None:
         """Przydziela zmianę i aktualizuje liczniki."""
         self.przydzial[imie][data] = kod
@@ -544,6 +549,38 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
                 break
 
 
+# Kontrola obsady po wygenerowaniu
+
+def zwaliduj_obsade(state: HarmonogramState, norm: object) -> None:
+    """Spisuje dni, w których obsada nie sięga wymaganego minimum.
+
+    Uruchamiane po wszystkich fazach. Zaostrzone reguły (np. limit nocek) mogą
+    sprawić, że części dyżurów nie da się obsadzić – wtedy zamiast łamać regułę
+    zostawiamy lukę i pokazujemy ją wprost.
+    """
+    min_d = norm.day_shifts_min if norm.day_shifts_min > 0 else norm.day_shifts
+
+    for data in state.dni:
+        wolny_dzien = data.weekday() >= 5 or czy_swieto(data, state.swieta)
+        wymagania = [("D", min_d), ("N", norm.night_shifts)]
+        # Zmiany R obsadzane są tylko w dni robocze – w weekendy i święta
+        # ich brak jest normalny, nie niedoborem.
+        if not wolny_dzien:
+            wymagania.append(("R", norm.r_shifts))
+
+        for typ, wymagane in wymagania:
+            if wymagane <= 0:
+                continue
+            obsadzone = _policz_obsade(state, data, typ)
+            if obsadzone < wymagane:
+                state.braki.append({
+                    "data": data,
+                    "typ": typ,
+                    "wymagane": wymagane,
+                    "obsadzone": obsadzone,
+                })
+
+
 # Generowanie harmonogramu dla jednej grupy
 
 def generuj_harmonogram_grupy(
@@ -573,6 +610,8 @@ def generuj_harmonogram_grupy(
     faza_3b_uzupelnianie(state, norm)
     faza_4_koncowki(state)
     faza_5_uzupelnij_puste_dni(state, norm)
+
+    zwaliduj_obsade(state, norm)
 
     return state
 
