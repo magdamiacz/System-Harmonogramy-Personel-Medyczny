@@ -39,6 +39,22 @@ st.set_page_config(
 
 inject_global_css()
 
+
+# Diagnostyka wersji bibliotek – widoczna wyłącznie po dopisaniu ?diag=1 do adresu.
+# Służy potwierdzeniu, że serwer faktycznie instaluje requirements.txt.
+# TYMCZASOWE – usunąć po weryfikacji wdrożenia bazy danych.
+if st.query_params.get("diag"):
+    import importlib
+
+    wersje = []
+    for nazwa in ("streamlit", "pandas", "openpyxl", "psycopg"):
+        try:
+            wersje.append(f"{nazwa} {importlib.import_module(nazwa).__version__}")
+        except Exception as e:
+            wersje.append(f"{nazwa} BRAK ({type(e).__name__})")
+    st.code(" | ".join(wersje), language=None)
+
+
 MIESIACE_PL = [
     "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
     "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień",
