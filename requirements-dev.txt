@@ -1,0 +1,5 @@
+# Zależności wyłącznie do testów – NIE instalowane na serwerze.
+# Uruchamianie testów:  python -m pytest
+
+-r requirements.txt
+pytest>=8.0,<9

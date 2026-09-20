@@ -8,6 +8,7 @@ from config import (
     FULL_SHIFT_MINUTES,
     MAX_WEEKLY_MINUTES_ETAT,
     MIN_REST_MINUTES,
+    NIGHT_SHIFTS,
     SHIFT_DURATIONS,
     SHIFT_END_HOUR,
     SHIFT_START_HOUR,
@@ -15,6 +16,10 @@ from config import (
     WORKING_SHIFTS,
 )
 from modules.data_loader import Pracownik
+
+# Rytm nocek: najwyżej 2 noce pod rząd, a po serii co najmniej 2 dni wolne.
+MAX_KOLEJNYCH_NOCY = 2
+DNI_WOLNE_PO_NOCACH = 2
 
 # Pomocnicze: czas końca ostatniej zmiany
 
@@ -214,6 +219,81 @@ def sprawdz_co_4_niedziela(
     return seria <= 3
 
 
+# Ograniczenie 3b: seria nocek i odpoczynek po niej
+
+def sprawdz_kolejne_noce(
+    przydzial: Dict[datetime.date, str],
+    data: datetime.date,
+    nowy_kod: str,
+    max_noce: int = MAX_KOLEJNYCH_NOCY,
+    dni_wolne: int = DNI_WOLNE_PO_NOCACH,
+) -> bool:
+    """
+    Pilnuje rytmu nocek: najwyżej `max_noce` nocy pod rząd, a po serii nocy
+    co najmniej `dni_wolne` dni bez pracy.
+
+    Sama reguła 12h przerwy tego NIE zapewnia: nocka kończy się o 7:00, a kolejna
+    zaczyna o 19:00, czyli dokładnie 720 minut później – warunek przechodzi i seria
+    nocek może rosnąć bez końca.
+
+    Sprawdzanie jest dwukierunkowe, bo fazy uzupełniające wstawiają dyżury także
+    PRZED już przydzielonymi i zbudowałyby zakazaną serię „od tyłu" (tak samo jak
+    przy regule co 4. niedzieli).
+
+    Oceniamy wyłącznie naruszenia, które wprowadza `nowy_kod` – wcześniejsze
+    kolizje w innym miejscu grafiku nie mogą blokować poprawnych przydziałów.
+
+    Dni spoza bieżącego miesiąca są traktowane jak wolne (brak danych), więc seria
+    przechodząca przez granicę miesiąca jest niewidoczna – to samo ograniczenie
+    dotyczy reguły niedzielnej.
+    """
+    if nowy_kod not in WORKING_SHIFTS:
+        return True
+
+    def kod_dnia(d: datetime.date) -> str:
+        return nowy_kod if d == data else przydzial.get(d, "")
+
+    def jest_noca(d: datetime.date) -> bool:
+        return kod_dnia(d) in NIGHT_SHIFTS
+
+    dzien = datetime.timedelta(days=1)
+
+    if jest_noca(data):
+        # 1. Długość serii nocy, do której należy nowy dyżur.
+        #    Szukamy jej granic w obie strony – wystarczy zajrzeć o `max_noce`
+        #    dni dalej, bo dłuższa seria i tak dyskwalifikuje przydział.
+        poczatek = data
+        for _ in range(max_noce):
+            if not jest_noca(poczatek - dzien):
+                break
+            poczatek -= dzien
+        koniec = data
+        for _ in range(max_noce):
+            if not jest_noca(koniec + dzien):
+                break
+            koniec += dzien
+
+        if (koniec - poczatek).days + 1 > max_noce or jest_noca(poczatek - dzien) or jest_noca(koniec + dzien):
+            return False
+
+        # 2. Po serii nocy muszą nastąpić dni wolne. Sprawdzenie W PRZÓD jest
+        #    konieczne, bo fazy uzupełniające dostawiają nocki PRZED dyżurami,
+        #    które już stoją w grafiku – naruszenie powstawałoby „od tyłu".
+        for odstep in range(1, dni_wolne + 1):
+            if kod_dnia(koniec + dzien * odstep) in WORKING_SHIFTS:
+                return False
+
+    # 3. Czy nowy dyżur nie wypada w dniach odpoczynku po wcześniejszej serii nocy.
+    #    Warunek `not jest_noca(d + dzien)` odsiewa sytuację, w której nowy dyżur
+    #    jest po prostu kolejną nocą tej samej serii – ten przypadek ocenia punkt 1.
+    for odstep in range(1, dni_wolne + 1):
+        wczesniej = data - dzien * odstep
+        if jest_noca(wczesniej) and not jest_noca(wczesniej + dzien):
+            return False
+
+    return True
+
+
 # Ograniczenie 4: niedyspozycje pracownika
 
 def sprawdz_niedyspozycje(
@@ -297,6 +377,10 @@ def czy_mozna_przydzielic(
     if not sprawdz_przerwe_12h_nastepna(przydzial, data, nowy_kod, koncowka_minuty):
         return False
 
+    # Rytm nocek: maks. 2 pod rząd, potem 2 dni wolne
+    if not sprawdz_kolejne_noce(przydzial, data, nowy_kod):
+        return False
+
     # Limit 36h/tydzień jest ograniczeniem miękkim (uśrednienie 40h w okresie rozliczeniowym) – realizowanym przez scoring S6 w scheduler.py.
     # Twarde pozostaje wyłącznie nieprzekroczenie normatywu miesięcznego.
 
@@ -312,4 +396,32 @@ def czy_mozna_przydzielic(
         if not sprawdz_co_4_niedziela(przydzial, data, nowy_kod, rok, miesiac):
             return False
 
+    return True
+
+
+def czy_mozna_przydzielic_awaryjnie(
+    przydzial: Dict[datetime.date, str],
+    data: datetime.date,
+    nowy_kod: str,
+    koncowka_minuty: int = 0,
+    rok: int = 0,
+    miesiac: int = 0,
+) -> bool:
+    """
+    Zestaw reguł dla fazy awaryjnej, która domyka dni bez żadnej obsady.
+
+    Faza ta świadomie pomija limit normatywu (dopuszcza nadgodziny), ale reguły
+    dotyczące bezpieczeństwa pracy muszą obowiązywać zawsze. Trzymamy je tutaj,
+    w jednym miejscu, żeby nie dało się dopisać nowej reguły do głównej bramki
+    i przeoczyć tej ścieżki – dokładnie tak powstała luka z seriami nocek.
+    """
+    if not sprawdz_przerwe_12h(przydzial, data, nowy_kod, koncowka_minuty):
+        return False
+    if not sprawdz_przerwe_12h_nastepna(przydzial, data, nowy_kod, koncowka_minuty):
+        return False
+    if not sprawdz_kolejne_noce(przydzial, data, nowy_kod):
+        return False
+    if rok and miesiac:
+        if not sprawdz_co_4_niedziela(przydzial, data, nowy_kod, rok, miesiac):
+            return False
     return True

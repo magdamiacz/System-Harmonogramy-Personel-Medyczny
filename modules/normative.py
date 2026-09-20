@@ -3,7 +3,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Optional
 
 from config import (
     FULL_SHIFT_MINUTES,
@@ -22,15 +22,24 @@ class Normatyw:
     """Normatyw miesięczny pracownika wraz z rozkładem na zmiany."""
     pracownik: str           # Imię i nazwisko
     typ_umowy: str
-    minuty: int              # Łączny normatyw w minutach
+    minuty: int              # Normatyw SKUTECZNY – już po odliczeniu urlopów
     pelne_dyzury_12h: int    # Liczba pełnych dyżurów 12h
     koncowka_minuty: int     # Reszta po pełnych dyżurach (0 = brak końcówki)
     dni_robocze: int         # Liczba dni roboczych w miesiącu
+    minuty_bazowe: int = 0   # Normatyw przed odliczeniem urlopów
+    minuty_absencji: int = 0 # Ile minut zdjęły urlopy
 
     @property
     def godziny_str(self) -> str:
         """Normatyw jako string 'Xh Ymin'."""
         return _minuty_na_str(self.minuty)
+
+    @property
+    def absencja_str(self) -> str:
+        """Odliczony urlop jako string, '—' gdy pracownik nie ma urlopu."""
+        if self.minuty_absencji == 0:
+            return "—"
+        return _minuty_na_str(self.minuty_absencji)
 
     @property
     def koncowka_str(self) -> str:
@@ -71,80 +80,78 @@ def minuty_na_godziny_float(minuty: int) -> float:
 
 # Główna funkcja obliczania normatywu
 
-def oblicz_normatyw(pracownik: Pracownik, liczba_dni_roboczych: int) -> Normatyw:
+def oblicz_normatyw(
+    pracownik: Pracownik,
+    liczba_dni_roboczych: int,
+    minuty_absencji: int = 0,
+) -> Normatyw:
     """
-    Oblicza normatyw miesięczny pracownika.
+    Oblicza normatyw miesięczny pracownika, pomniejszony o godziny urlopu.
 
-    Dla etatowców:
+    Podstawa dla etatowców:
         - zwykły:        liczba_dni_roboczych × 7h35min (455 min)
         - z orzeczeniem: liczba_dni_roboczych × 7h00min (420 min)
-    Rozkład na zmiany: normatyw // 720 pełnych dyżurów 12h + reszta (końcówka).
+    Dla kontraktów podstawą jest minimum umowne: 160h (duży) albo 120h (mały).
 
-    Dla kontraktów:
-        - duży kontrakt: minimum 160h (bez sztywnego normatywu, liczymy minimum)
-        - mały kontrakt: minimum 120h
+    Od podstawy odejmujemy `minuty_absencji` (urlop). Pole `minuty` niesie
+    normatyw SKUTECZNY, dzięki czemu bilans, limit nadgodzin i scoring działają
+    bez żadnych zmian.
+
+    Rozkład na zmiany liczony jest z wartości POMNIEJSZONEJ – długość końcówki
+    DK to `minuty % 720`, więc urlop skraca również końcówkę.
     """
     if pracownik.is_etat:
-        # Etatowiec - normatyw zależy od liczby dni roboczych
-        if pracownik.orzeczenie:
-            minuty = liczba_dni_roboczych * WORK_MINUTES_PER_DAY_DISABILITY
-        else:
-            minuty = liczba_dni_roboczych * WORK_MINUTES_PER_DAY_STANDARD
-
-        # Pracownicy tylko_7h mają zmiany R a nie 12h, więc nie rozkładamy na 12h
-        if pracownik.tylko_7h:
-            pelne_dyzury = 0
-            koncowka = 0
-        else:
-            # Rozkład na dyżury 12h + końcówka
-            pelne_dyzury = minuty // FULL_SHIFT_MINUTES
-            koncowka = minuty % FULL_SHIFT_MINUTES
-
-        return Normatyw(
-            pracownik=pracownik.imie_nazwisko,
-            typ_umowy=pracownik.typ_umowy,
-            minuty=minuty,
-            pelne_dyzury_12h=pelne_dyzury,
-            koncowka_minuty=koncowka,
-            dni_robocze=liczba_dni_roboczych,
+        na_dobe = (
+            WORK_MINUTES_PER_DAY_DISABILITY if pracownik.orzeczenie
+            else WORK_MINUTES_PER_DAY_STANDARD
         )
-
+        minuty_bazowe = liczba_dni_roboczych * na_dobe
     elif pracownik.is_duzy_kontrakt:
-        # Duży kontrakt: minimum 160h - rozkładamy na maksymalnie możliwe DN/D/N
-        minuty = MIN_HOURS_DUZY_KONTRAKT
-        return Normatyw(
-            pracownik=pracownik.imie_nazwisko,
-            typ_umowy=pracownik.typ_umowy,
-            minuty=minuty,
-            pelne_dyzury_12h=minuty // FULL_SHIFT_MINUTES,
-            koncowka_minuty=minuty % FULL_SHIFT_MINUTES,
-            dni_robocze=liczba_dni_roboczych,
-        )
-
+        minuty_bazowe = MIN_HOURS_DUZY_KONTRAKT
     else:
-        # Mały kontrakt: minimum 120h
-        minuty = MIN_HOURS_MALY_KONTRAKT
-        return Normatyw(
-            pracownik=pracownik.imie_nazwisko,
-            typ_umowy=pracownik.typ_umowy,
-            minuty=minuty,
-            pelne_dyzury_12h=minuty // FULL_SHIFT_MINUTES,
-            koncowka_minuty=minuty % FULL_SHIFT_MINUTES,
-            dni_robocze=liczba_dni_roboczych,
-        )
+        minuty_bazowe = MIN_HOURS_MALY_KONTRAKT
+
+    minuty_absencji = max(0, minuty_absencji)
+    minuty = max(0, minuty_bazowe - minuty_absencji)
+
+    # Pracownicy tylko_7h pracują na zmianach R, nie na 12h – bez rozkładu i końcówki
+    if pracownik.is_etat and pracownik.tylko_7h:
+        pelne_dyzury = 0
+        koncowka = 0
+    else:
+        pelne_dyzury = minuty // FULL_SHIFT_MINUTES
+        koncowka = minuty % FULL_SHIFT_MINUTES
+
+    return Normatyw(
+        pracownik=pracownik.imie_nazwisko,
+        typ_umowy=pracownik.typ_umowy,
+        minuty=minuty,
+        pelne_dyzury_12h=pelne_dyzury,
+        koncowka_minuty=koncowka,
+        dni_robocze=liczba_dni_roboczych,
+        minuty_bazowe=minuty_bazowe,
+        minuty_absencji=minuty_absencji,
+    )
 
 
 def oblicz_normatywy(
     pracownicy: List[Pracownik],
     liczba_dni_roboczych: int,
+    minuty_absencji: Optional[Dict[str, int]] = None,
 ) -> dict:
     """
     Oblicza normatywy dla całej listy pracowników.
 
+    `minuty_absencji` to {imie_nazwisko: minuty urlopu w tym miesiącu}.
+    Pominięcie argumentu daje normatywy bez odliczeń – jak przed zmianą.
+
     Zwraca słownik {imie_nazwisko: Normatyw}.
     """
+    absencje = minuty_absencji or {}
     return {
-        p.imie_nazwisko: oblicz_normatyw(p, liczba_dni_roboczych)
+        p.imie_nazwisko: oblicz_normatyw(
+            p, liczba_dni_roboczych, absencje.get(p.imie_nazwisko, 0)
+        )
         for p in pracownicy
     }
 

@@ -18,7 +18,11 @@ from config import (
     WORK_MINUTES_PER_DAY_STANDARD,
     WORKING_SHIFTS,
 )
-from modules.constraints import czy_mozna_przydzielic, oblicz_godziny_tygodnia, sprawdz_co_4_niedziela, sprawdz_przerwe_12h, sprawdz_przerwe_12h_nastepna
+from modules.constraints import (
+    czy_mozna_przydzielic,
+    czy_mozna_przydzielic_awaryjnie,
+    oblicz_godziny_tygodnia,
+)
 from modules.data_loader import Pracownik
 from modules.holidays import czy_swieto, czy_weekend
 from modules.normative import Normatyw, oblicz_normatywy
@@ -488,19 +492,37 @@ def faza_5_uzupelnij_puste_dni(state: HarmonogramState, norm: object) -> None:
                         state.przydziel(imie, data, "R")
                         assigned = True
                     break
-                if not allow_overtime and p.is_etat:
-                    if state.przepracowane[imie] + FULL_SHIFT_MINUTES > state.normatywy[imie].minuty:
-                        continue
-                kod = "D" if state.liczba_na_dzien(data, "D") <= state.liczba_na_dzien(data, "N") else "N"
-                if not sprawdz_co_4_niedziela(state.przydzial[imie], data, kod, data.year, data.month):
+
+                # Nadgodziny wolno dopuścić wyłącznie kontraktowcom i dopiero
+                # w drugim podejściu. Etatowiec nie przekracza normatywu nigdy.
+                przekroczy = (
+                    state.przepracowane[imie] + FULL_SHIFT_MINUTES
+                    > state.normatywy[imie].minuty
+                )
+                if przekroczy and (p.is_etat or not allow_overtime):
                     continue
-                if not sprawdz_przerwe_12h(state.przydzial[imie], data, kod, state.normatywy[imie].koncowka_minuty):
-                    continue
-                if not sprawdz_przerwe_12h_nastepna(state.przydzial[imie], data, kod, state.normatywy[imie].koncowka_minuty):
-                    continue
-                state.przydziel(imie, data, kod)
-                assigned = True
-                break
+
+                # Zacznij od zmiany słabiej obsadzonej, ale gdy reguły jej nie
+                # przepuszczą – spróbuj drugiej, zamiast rezygnować z pracownika.
+                if state.liczba_na_dzien(data, "D") <= state.liczba_na_dzien(data, "N"):
+                    kolejnosc = ("D", "N")
+                else:
+                    kolejnosc = ("N", "D")
+
+                for kod in kolejnosc:
+                    if czy_mozna_przydzielic_awaryjnie(
+                        przydzial=state.przydzial[imie],
+                        data=data,
+                        nowy_kod=kod,
+                        koncowka_minuty=state.normatywy[imie].koncowka_minuty,
+                        rok=data.year,
+                        miesiac=data.month,
+                    ):
+                        state.przydziel(imie, data, kod)
+                        assigned = True
+                        break
+                if assigned:
+                    break
             if assigned:
                 break
 
