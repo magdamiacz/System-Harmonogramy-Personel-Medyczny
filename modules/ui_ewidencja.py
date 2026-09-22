@@ -210,8 +210,21 @@ def renderuj_ekran_nieobecnosci(rok: int, miesiac: int, nazwa_miesiaca: str) -> 
         st.info("Najpierw dodaj pracowników na ekranie „Pracownicy”.")
         return
 
-    _formularz_zakresu(pracownicy, rok, miesiac)
-    _siatka_miesiaca(pracownicy, wpisy, rok, miesiac)
+    # Jeden wybór oddziału rządzi całym ekranem – i formularzem, i siatką.
+    # Osobne filtry w obu miejscach zmuszałyby do ustawiania tego samego dwa razy.
+    grupy = sorted({p.schedule_key for p in pracownicy})
+    wybrana = st.selectbox(
+        "Oddział i rola",
+        grupy,
+        format_func=lambda k: SCHEDULE_LABELS.get(k, k),
+        key="nieobecnosci_grupa",
+        help="Zawęża listę pracowników poniżej oraz siatkę miesiąca.",
+    )
+    widoczni = [p for p in pracownicy if p.schedule_key == wybrana]
+    st.caption(f"{SCHEDULE_LABELS.get(wybrana, wybrana)} — {len(widoczni)} osób")
+
+    _formularz_zakresu(widoczni, rok, miesiac)
+    _siatka_miesiaca(widoczni, wpisy, rok, miesiac, wybrana)
 
 
 def _formularz_zakresu(pracownicy: list, rok: int, miesiac: int) -> None:
@@ -274,19 +287,19 @@ def _formularz_zakresu(pracownicy: list, rok: int, miesiac: int) -> None:
                 st.error(f"Nie udało się zapisać: {e}")
 
 
-def _siatka_miesiaca(pracownicy: list, wpisy: List[dict], rok: int, miesiac: int) -> None:
+def _siatka_miesiaca(
+    widoczni: list,
+    wpisy: List[dict],
+    rok: int,
+    miesiac: int,
+    klucz_grupy: str,
+) -> None:
     import calendar
 
     ostatni = calendar.monthrange(rok, miesiac)[1]
     dni = [datetime.date(rok, miesiac, d) for d in range(1, ostatni + 1)]
     kolumny = [f"{NAZWY_DNI[d.weekday()]} {d.day}" for d in dni]
     kolumna_dla_daty = dict(zip(dni, kolumny))
-
-    grupy = sorted({p.schedule_key for p in pracownicy})
-    wybrana = st.selectbox(
-        "Grupa", grupy, format_func=lambda k: SCHEDULE_LABELS.get(k, k), key="siatka_grupa"
-    )
-    widoczni = [p for p in pracownicy if p.schedule_key == wybrana]
 
     biezace: Dict[str, Dict[str, str]] = {p.imie_nazwisko: {} for p in widoczni}
     for wpis in wpisy:
@@ -315,11 +328,11 @@ def _siatka_miesiaca(pracownicy: list, wpisy: List[dict], rok: int, miesiac: int
         )
 
     edytowany = st.data_editor(
-        df, key=f"editor_nieobecnosci_{wybrana}", use_container_width=True,
+        df, key=f"editor_nieobecnosci_{klucz_grupy}", use_container_width=True,
         hide_index=True, num_rows="fixed", column_config=konfiguracja,
     )
 
-    if st.button("Zapisz nieobecności", type="primary", key=f"zapisz_nieob_{wybrana}"):
+    if st.button("Zapisz nieobecności", type="primary", key=f"zapisz_nieob_{klucz_grupy}"):
         _zapisz_siatke(df, edytowany, kolumna_dla_daty)
 
 
