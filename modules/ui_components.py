@@ -304,6 +304,29 @@ def _renderuj_braki(braki: List[dict], dni: List[datetime.date]) -> None:
         st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
 
 
+def _renderuj_niespelnione_prosby(prosby: List[dict]) -> None:
+    """Prośby, których grafik nie uwzględnił – obsada miała pierwszeństwo."""
+    NAZWY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"]
+    with st.expander(f"Prośby niespełnione ({len(prosby)})"):
+        st.caption(
+            "Prośby są preferencją, nie regułą — gdy inaczej zabrakłoby obsady, "
+            "algorytm je pomija. Możesz poprawić te dni ręcznie w edytorze."
+        )
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "Pracownik": p["pracownik"],
+                    "Dzień": f"{NAZWY_DNI[p['data'].weekday()]} {p['data'].day}",
+                    "Prosił(a) o": p["prosba"],
+                    "Przydzielono": p["przydzielono"],
+                }
+                for p in prosby
+            ]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 # Renderowanie tabeli harmonogramu
 
 def renderuj_harmonogram(
@@ -325,6 +348,9 @@ def renderuj_harmonogram(
     # Braki obsady – zanim użytkownik zobaczy grafik
     if getattr(state, "braki", None):
         _renderuj_braki(state.braki, dni)
+
+    if getattr(state, "niespelnione_prosby", None):
+        _renderuj_niespelnione_prosby(state.niespelnione_prosby)
 
     # Nagłówek: normatyw i końcówka
     if liczba_dni_roboczych > 0:
