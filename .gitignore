@@ -6,3 +6,5 @@ Harmonogramy-Mac.zip
 .streamlit/secrets.toml
 .env
 .DS_Store
+.neon
+.env.local
