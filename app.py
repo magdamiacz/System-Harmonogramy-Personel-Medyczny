@@ -11,7 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import SCHEDULE_KEYS, SCHEDULE_LABELS, WORK_MINUTES_PER_DAY_STANDARD
 from modules.normative import _minuty_na_str
-from modules.data_loader import grupuj_wg_harmonogramu, wczytaj_niedyspozycje, wczytaj_personel
+from modules.data_loader import grupuj_wg_harmonogramu
+from modules.repository import wczytaj_pracownikow
+from modules.ui_ewidencja import renderuj_ekran_nieobecnosci, renderuj_ekran_pracownikow
 from modules.holidays import get_month_info
 from modules.scheduler import generuj_wszystkie_harmonogramy
 from modules.icons import logo_svg
@@ -60,6 +62,12 @@ MIESIACE_PL = [
     "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień",
 ]
 
+# Ekrany aplikacji
+WIDOK_GRAFIK = "Grafik"
+WIDOK_PRACOWNICY = "Pracownicy"
+WIDOK_NIEOBECNOSCI = "Nieobecności"
+WIDOKI = [WIDOK_GRAFIK, WIDOK_PRACOWNICY, WIDOK_NIEOBECNOSCI]
+
 
 # Login screen
 def show_login():
@@ -105,6 +113,13 @@ st.markdown(
 with st.sidebar:
     st.markdown(brand_html(), unsafe_allow_html=True)
 
+    widok = st.radio(
+        "Widok",
+        WIDOKI,
+        key="widok",
+        label_visibility="collapsed",
+    )
+
     with st.container(border=True):
         st.markdown(card_head_html("calendar-days", "Parametry"), unsafe_allow_html=True)
 
@@ -126,39 +141,33 @@ with st.sidebar:
             key="miesiac",
         )
 
-    with st.container(border=True):
-        st.markdown(card_head_html("folder-up", "Import danych"), unsafe_allow_html=True)
-
-        # Plik personelu
-        personel_file = st.file_uploader(
-            "Plik personelu (CSV)",
-            type=["csv"],
-            key="personel_upload",
-            help="Format: imie_nazwisko, oddzial, rola, typ_umowy, orzeczenie, tylko_7h, pracuje_w_weekendy",
-        )
-
-        # Plik niedyspozycji (opcjonalny)
-        niedysp_file = st.file_uploader(
-            "Plik niedyspozycji (CSV) – opcjonalny",
-            type=["csv"],
-            key="niedysp_upload",
-            help="Format: imie_nazwisko, data (YYYY-MM-DD)",
-        )
-
     st.divider()
 
-    # Przycisk generowania
-    generuj_btn = st.button(
-        "Generuj harmonogram",
-        type="primary",
-        use_container_width=True,
-        key="generuj_btn",
-    )
+    # Przycisk generowania – tylko na ekranie grafiku
+    generuj_btn = False
+    if widok == WIDOK_GRAFIK:
+        generuj_btn = st.button(
+            "Generuj harmonogram",
+            type="primary",
+            use_container_width=True,
+            key="generuj_btn",
+        )
 
     # Wylogowanie
     if st.button("Wyloguj się", use_container_width=True):
         st.session_state["logged_in"] = False
         st.rerun()
+
+
+# Przełączanie ekranów
+
+if widok == WIDOK_PRACOWNICY:
+    renderuj_ekran_pracownikow()
+    st.stop()
+
+if widok == WIDOK_NIEOBECNOSCI:
+    renderuj_ekran_nieobecnosci(int(rok), int(miesiac), MIESIACE_PL[int(miesiac) - 1])
+    st.stop()
 
 
 # Główna logika: wczytaj dane i wygeneruj harmonogram
@@ -170,29 +179,22 @@ if "info_miesiaca" not in st.session_state:
     st.session_state["info_miesiaca"] = None
 
 
-def wczytaj_i_generuj(personel_src, niedysp_src, rok: int, miesiac: int):
-    """Wczytuje dane, waliduje i uruchamia generator harmonogramów."""
-    bledy_all = []
-
-    # Wczytaj personel
+def wczytaj_i_generuj(rok: int, miesiac: int):
+    """Wczytuje pracowników z bazy i uruchamia generator harmonogramów."""
     try:
-        pracownicy, bledy = wczytaj_personel(personel_src)
-        bledy_all.extend(bledy)
-    except ValueError as e:
-        st.error(f"Błąd wczytywania pliku personelu: {e}")
+        pracownicy, bledy_all = wczytaj_pracownikow(int(rok), int(miesiac))
+    except Exception as e:
+        st.error(
+            "Nie udało się pobrać danych z bazy. Sprawdź, czy `DATABASE_URL` jest "
+            "ustawiony w sekretach aplikacji."
+        )
+        with st.expander("Szczegóły techniczne"):
+            st.code(str(e), language=None)
         return None, None
 
     if not pracownicy:
-        st.error("Brak pracowników w pliku personelu.")
+        st.error("W bazie nie ma żadnych pracowników. Dodaj ich na ekranie „Pracownicy”.")
         return None, None
-
-    # Wczytaj niedyspozycje (jeśli podano)
-    if niedysp_src is not None:
-        try:
-            _, bledy_nd = wczytaj_niedyspozycje(niedysp_src, pracownicy)
-            bledy_all.extend(bledy_nd)
-        except ValueError as e:
-            st.warning(f"Błąd wczytywania niedyspozycji: {e}")
 
     # Pokaż ostrzeżenia
     if bledy_all:
@@ -222,21 +224,19 @@ def wczytaj_i_generuj(personel_src, niedysp_src, rok: int, miesiac: int):
 
 # Obsługa przycisku generowania
 if generuj_btn:
-    if personel_file is None:
-        st.error("Wgraj plik personelu przed generowaniem harmonogramu.")
-    else:
-        harmonogramy, info = wczytaj_i_generuj(
-            personel_src=personel_file,
-            niedysp_src=niedysp_file,
-            rok=rok,
-            miesiac=miesiac,
+    harmonogramy, info = wczytaj_i_generuj(rok=rok, miesiac=miesiac)
+    if harmonogramy is not None:
+        st.session_state["harmonogramy"] = harmonogramy
+        st.session_state["info_miesiaca"] = info
+        braki = sum(len(state.braki) for state in harmonogramy.values())
+        st.success(
+            f"Harmonogram wygenerowany dla {info['liczba_dni']} dni "
+            f"({info['liczba_dni_roboczych']} dni roboczych)."
         )
-        if harmonogramy is not None:
-            st.session_state["harmonogramy"] = harmonogramy
-            st.session_state["info_miesiaca"] = info
-            st.success(
-                f"Harmonogram wygenerowany dla {info['liczba_dni']} dni "
-                f"({info['liczba_dni_roboczych']} dni roboczych)."
+        if braki:
+            st.warning(
+                f"W {braki} miejscach nie udało się zebrać pełnej obsady — "
+                "szczegóły przy poszczególnych grafikach poniżej."
             )
 
 
@@ -249,27 +249,18 @@ if not harmonogramy:
     # Ekran powitalny przed wygenerowaniem
     st.markdown(section_title_html("clipboard-list", "Zacznij tutaj"), unsafe_allow_html=True)
     st.info(
-        "Wgraj plik personelu w panelu bocznym i kliknij **Generuj harmonogram**, "
+        "Wybierz miesiąc w panelu bocznym i kliknij **Generuj harmonogram**, "
         "aby zobaczyć rozkład zmian."
     )
 
-    # Podpowiedź dot. pliku personelu
-    with st.expander("Przykład formatu pliku personelu (CSV)"):
-        st.code(
-            "imie_nazwisko,oddzial,rola,typ_umowy,orzeczenie,tylko_7h,pracuje_w_weekendy\n"
-            "Kowalska Anna,gastrologiczny,pielęgniarki,etat,nie,nie,tak\n"
-            "Nowak Jan,wewnętrzny,pielęgniarki,duzy_kontrakt,nie,nie,tak\n"
-            "Wiśniewska Ewa,OIOK,pielęgniarki,etat,nie,tak,nie",
-            language="csv",
-        )
-
-    with st.expander("Przykład formatu pliku niedyspozycji (CSV)"):
-        st.code(
-            "imie_nazwisko,data\n"
-            "Kowalska Anna,2026-01-05\n"
-            "Kowalska Anna,2026-01-12\n"
-            "Nowak Jan,2026-01-20",
-            language="csv",
+    with st.expander("Skąd system bierze dane?"):
+        st.markdown(
+            "- **Pracownicy** — ekran „Pracownicy” w panelu bocznym. Dane zapisują się "
+            "w bazie, więc wpisujesz je raz.\n"
+            "- **Niedyspozycje, urlopy i prośby** — ekran „Nieobecności”, osobno dla "
+            "każdego miesiąca. Algorytm uwzględnia je przy układaniu grafiku.\n"
+            "- **Urlop godzinowy** — wpisz `U12`, aby odjąć 12 godzin od normatywu. "
+            "Samo `U` odejmuje pełną normę dobową."
         )
 else:
     # Metadane miesiąca (normatyw = dni_robocze × 7h35min)

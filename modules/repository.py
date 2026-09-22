@@ -179,8 +179,12 @@ def zapisz_pracownika(dane: dict) -> None:
                     aktywny            = TRUE
             """, (
                 str(dane["imie_nazwisko"]).strip(),
-                str(dane["oddzial"]).strip(),
-                str(dane["rola"]).strip(),
+                # Oddział i rolę zapisujemy małymi literami. get_schedule_key i tak
+                # porównuje je bez uwzględniania wielkości, ale w formularzu lista
+                # wyboru kasuje wartości spoza swoich opcji – a "OIOK" i "oiok"
+                # wyglądałyby dla niej jak dwie różne rzeczy.
+                str(dane["oddzial"]).strip().lower(),
+                str(dane["rola"]).strip().lower(),
                 str(dane["typ_umowy"]).strip().lower(),
                 bool(dane.get("orzeczenie", False)),
                 bool(dane.get("tylko_7h", False)),
