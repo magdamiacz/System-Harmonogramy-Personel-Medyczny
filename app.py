@@ -56,6 +56,17 @@ if st.query_params.get("diag"):
             wersje.append(f"{nazwa} BRAK ({type(e).__name__})")
     st.code(" | ".join(wersje), language=None)
 
+    # Łączność z bazą – bez ujawniania adresu ani danych
+    try:
+        from modules.db import polaczenie
+
+        with polaczenie() as _conn:
+            with _conn.cursor() as _cur:
+                _cur.execute("SELECT count(*) FROM pracownicy WHERE aktywny")
+                st.code(f"baza OK | aktywnych pracownikow: {_cur.fetchone()[0]}", language=None)
+    except Exception as e:
+        st.code(f"baza BLAD | {type(e).__name__}: {str(e)[:120]}", language=None)
+
 
 MIESIACE_PL = [
     "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
